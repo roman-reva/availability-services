@@ -2,9 +2,11 @@ package com.services.availability.server.storage;
 
 import org.apache.log4j.Logger;
 
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 
@@ -14,27 +16,108 @@ import java.nio.channels.FileChannel;
  * @since 2014-07-01 14:28
  */
 public class HashMapMMAPStorage implements Storage {
-    public static final int STORAGE_SIZE = 1024*1024*1024;  // 1 GB
-    public static final int RECORD_SIZE = 8 + 4 + 2 + 4;    // key(long) + sku(int) + store(short) + amount(int) = 18
+    public static final String STORAGE_FILE = "data.dat";       // storage filename
 
-    public static final int STORAGE_HEADER_SIZE = 8;             // buckets number (int) + bucket capacity (int)
+    public static final int STORAGE_SIZE = 1024*1024*1024;      // 1 GB
+    public static final int STORAGE_HEADER_SIZE = 8;            // bucketNumber:int + bucketCapacity:int
+    public static final int STORAGE_BUCKET_NUM_OFFSET = 0;      // bucketNumber:int + bucketCapacity:int
+    public static final int STORAGE_BUCKET_CAP_OFFSET = 4;      // bucketNumber:int + bucketCapacity:int
 
-    public static final int INITIAL_BUCKET_NUMBER = 1024 * 1024;
-    public static final int BUCKET_CAPACITY = 32;
-    public static final int BUCKET_SIZE = BUCKET_CAPACITY * RECORD_SIZE + 4;    // 4 for number of records, total 580
+    public static final int DEFAULT_INITIAL_BUCKET_NUMBER = 256;
+    public static final int DEFAULT_BUCKET_CAPACITY = 32;
+    public static final int RESIZE_COEFFICIENT = 4;             // resize multiplier
 
-    private boolean forceWrites = true;
+    private static Logger log = Logger.getLogger(HashMapMMAPStorage.class);
 
-    private Logger log = Logger.getLogger(HashMapMMAPStorage.class);
+    private final MappedByteBuffer mappedBuffer;                // main storage buffer, mmaped to the file system
+    private ByteBuffer tmpBuffer;                               // temporary buffer, allocated during the resize operation
 
-    private final MappedByteBuffer buffer;
-    private int bucketNumber;
+    private final int bucketCapacity;                           // number of records in a bucket
+    private final int bucketSize;                               // number of bytes allocated for bucket
+    private int bucketNumber;                                   // current number of buckets in the storage
 
+    private boolean forceWrites = true;                         // flush of the mmaped buffer required after put/remove
+
+
+    /**
+     * Initializes the storage. First an attempt to restore data from file
+     * is made.
+     *
+     * If file exists its structure is verified. If errors in headers are found, an
+     * exception is thrown. Otherwise, file is considered as valid and is used as storage.
+     *
+     * If file doesn't exist, it is been created, the data structure is initialized and
+     * storage parameters to the default values.
+     */
     public HashMapMMAPStorage() {
-        this.bucketNumber = INITIAL_BUCKET_NUMBER;
+        boolean storageExists = storageFileExists();
+        this.mappedBuffer = bindMappedBuffer();
+
+        if (storageExists) {
+            this.bucketNumber = readStorageBktNum(mappedBuffer);
+            this.bucketCapacity = readStorageBktCapacity(mappedBuffer);
+            this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
+
+            verifyNonEmptyMappedBuffer();
+        } else {
+            this.bucketNumber = DEFAULT_INITIAL_BUCKET_NUMBER;
+            this.bucketCapacity = DEFAULT_BUCKET_CAPACITY;
+            this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
+
+            verifyAllocatedSpace(bucketNumber);     // verifying that storage file has enough space for data structure
+            initEmptyMappedBuffer();
+        }
+    }
+
+    /**
+     * Initializes the storage. First an attempt to restore data from file
+     * is made.
+     *
+     * If file exists its structure is verified. If errors in headers are found, an
+     * exception is thrown. Otherwise, file is considered as valid and is used as storage.
+     *
+     * If file doesn't exist, it is been created, the data structure is initialized and
+     * storage parameters to the specified values.
+     *
+     * @param initialBucketNumber initial number of buckets
+     * @param bucketCapacity number of records in a bucket
+     */
+    public HashMapMMAPStorage(int initialBucketNumber, int bucketCapacity) {
+        boolean storageExists = storageFileExists();
+        this.mappedBuffer = bindMappedBuffer();
+
+        if (storageExists) {
+            this.bucketNumber = readStorageBktNum(mappedBuffer);
+            this.bucketCapacity = readStorageBktCapacity(mappedBuffer);
+            this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
+
+            verifyNonEmptyMappedBuffer();
+        } else {
+            this.bucketNumber = initialBucketNumber;
+            this.bucketCapacity = bucketCapacity;
+            this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
+
+            verifyAllocatedSpace(bucketNumber);     // verifying that storage file has enough space for data structure
+            initEmptyMappedBuffer();
+        }
+    }
+
+    /**
+     * Verifies if storage file exists.
+     * @return true, if exists
+     */
+    private boolean storageFileExists() {
+        File file = new File(STORAGE_FILE);
+        return file.exists();
+    }
+
+    /**
+     * Allocates and initializes mmaped buffer.
+     */
+    private MappedByteBuffer bindMappedBuffer() {
         MappedByteBuffer buffer = null;
         try {
-            RandomAccessFile file = new RandomAccessFile("data.dat", "rw");
+            RandomAccessFile file = new RandomAccessFile(STORAGE_FILE, "rw");
             FileChannel fileChannel = file.getChannel();
             buffer = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, STORAGE_SIZE);
         } catch (FileNotFoundException e) {
@@ -43,33 +126,124 @@ public class HashMapMMAPStorage implements Storage {
             log.error(e);
         }
 
-        this.buffer = buffer;
-        initBuckets();
+        return buffer;
     }
 
     /**
-     * Current method creates initial number of buckets in the byte buffer.
+     * Verifies that there is enough space allocated in mapped buffer
+     * to keep all required data.
+     *
+     * @param bucketNumber number of bucket
      */
-    private void initBuckets() {
-        buffer.putInt(bucketNumber);
-        buffer.putInt(BUCKET_CAPACITY);
+    private void verifyAllocatedSpace(int bucketNumber) {
+        int spaceRequired = bucketNumber * bucketSize + STORAGE_HEADER_SIZE;
+        if (spaceRequired > STORAGE_SIZE) throw new IndexOutOfBoundsException("Not enough storage space for resize (" +
+                spaceRequired + " bytes required, while storage has " + STORAGE_SIZE + " bytes allocated).");
+    }
 
-        byte [] bucket = new byte[BUCKET_SIZE];
+    /**
+     * Verifies that storage has correct data structure and contains valid data.
+     * Throws IllegalStateException in the case if the file is corrupted.
+     */
+    private void verifyNonEmptyMappedBuffer() {
+        IllegalStateException corruptedException = new IllegalStateException("file `" + STORAGE_FILE + "` is corrupted");
+
+        if (bucketNumber <= 0) {
+            log.debug("storage file is corrupted");
+            throw corruptedException;
+        }
+        if (bucketCapacity <= 0) {
+            log.debug("storage file is corrupted");
+            throw corruptedException;
+        }
+
+        int structureSize = STORAGE_HEADER_SIZE + bucketNumber * bucketSize;
+        if (structureSize > STORAGE_SIZE) {
+            log.debug("storage file is corrupted");
+            throw corruptedException;
+        }
+
+        int bktSize, totalRcdNum = 0;
+        byte[] bkt;
+        for (int bktIdx=0; bktIdx<bucketNumber; bktIdx++) {
+            bkt = readBucketByIdx(bktIdx, mappedBuffer);
+            bktSize = BinaryBucket.getSize(bkt);
+
+            if (bktSize < 0 || bktSize > bucketCapacity) {
+                log.debug("storage file is corrupted");
+                throw corruptedException;
+            }
+            totalRcdNum += bktSize;
+        }
+
+        log.debug("storage file is verified and looks fine (bktNum = " + bucketNumber + ", bktCap = " + bucketCapacity + ", rcdNum = " + totalRcdNum + ")");
+    }
+
+
+    /**
+     * Current method initializes a an empty storage backed by mmaped buffer.
+     * Sets up a storage header and a set of empty buckets in the buffer.
+     */
+    private void initEmptyMappedBuffer() {
+        writeStorageHeader(mappedBuffer, bucketNumber, bucketCapacity);
+        initBuckets(mappedBuffer, bucketNumber, STORAGE_HEADER_SIZE);           // initializing buckets
+
+        mappedBuffer.force();
+    }
+
+    /**
+     * Current method initializes a storage header and a set of
+     * buckets in the mapped byte buffer.
+     *
+     * @param buffer target buffer to initialize
+     * @param bktNum number of buckets to initialize
+     * @param bktCapacity bucket capacity
+     */
+    private void initEmptyByteBuffer(ByteBuffer buffer, int bktNum, int bktCapacity) {
+        for (int i=0; i<buffer.capacity(); i++) buffer.put((byte)0);
+        writeStorageHeader(buffer, bktNum, bktCapacity);
+    }
+
+    /**
+     * Writes storage header data into the provided buffer.
+     */
+    private void writeStorageHeader(ByteBuffer buffer, int bktNum, int bktCapacity) {
+        byte[] header = new byte[STORAGE_HEADER_SIZE];
+        ByteUtils.putInt(bktNum, header, 0);
+        ByteUtils.putInt(bktCapacity, header, 4);
+
+        int byteIdx = 0;
+        while (byteIdx < header.length) {
+            byte b = header[byteIdx];
+            buffer.put(byteIdx++, b);
+        }
+    }
+
+    /**
+     * Current method initializes a specified number of buckets in the provided
+     * buffer starting from the offset.
+     *
+     * @param buffer target mapped buffer
+     * @param bucketNumber number of buckets to initialize
+     * @param offset write offset
+     */
+    private void initBuckets(ByteBuffer buffer, int bucketNumber, int offset) {
+        byte [] bucket = new byte[bucketSize];
         BinaryBucket.setSize(0, bucket);
-        for (int bktIdx=0; bktIdx<INITIAL_BUCKET_NUMBER; bktIdx++) {
-            int bktOffset = STORAGE_HEADER_SIZE + bktIdx * BUCKET_SIZE;
+        for (int bktIdx = 0; bktIdx < bucketNumber; bktIdx++) {
+            int bktOffset = offset + bktIdx * bucketSize;
             for (int byteIdx=0; byteIdx<bucket.length; byteIdx++)
                 buffer.put(bktOffset + byteIdx, bucket[byteIdx]);
         }
-
-        if (forceWrites) buffer.force();
     }
+
+
 
     @Override
     public void put(long key, AvailabilityItem value) {
         int bucketIdx = getBucketIdxByKey(key);
-        byte[] bucket = readBucketByIdx(bucketIdx),
-                record = new byte[RECORD_SIZE];
+        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
+                record = new byte[BinaryRecord.RECORD_SIZE];
 
         int recordIdx = lookupInBucket(key, bucket, record);
 
@@ -78,28 +252,29 @@ public class HashMapMMAPStorage implements Storage {
         BinaryRecord.setStore(value.getStore(), record);
         BinaryRecord.setAmount(value.getAmount(), record);
 
-        if (recordIdx >= 0) {                               // if record with such key already exists
-            writeRecordByIdx(bucketIdx, recordIdx, record); // then updating the record data
-            if (forceWrites) buffer.force();
+        if (recordIdx >= 0) {                                               // if record with such key already exists
+            writeRecordByIdx(bucketIdx, recordIdx, record, mappedBuffer);   // then updating the record data
+            if (forceWrites) mappedBuffer.force();
             return;
         }
 
-        // otherwise, if record was not found
-        int bucketSize = BinaryBucket.getSize(bucket);
-        if (bucketSize >= BUCKET_CAPACITY) {
-            throw new RuntimeException("Bucket(idx=" + bucketIdx + ") is overflowed");
-        }
-        writeRecordByIdx(bucketIdx, bucketSize, record);    // writing the record to the end of the bucket
-        writeBucketSize(bucketIdx, bucketSize + 1);         // and updating the bucket size
+        int bucketSize = BinaryBucket.getSize(bucket);                      // otherwise, if record was not found
+        if (bucketSize < bucketCapacity) {                                  // and bucket is not full
+            writeRecordByIdx(bucketIdx, bucketSize, record, mappedBuffer);  // writing the record to the end of the bucket
+            writeBucketSize(bucketIdx, bucketSize + 1, mappedBuffer);       // and updating the bucket size
 
-        if (forceWrites) buffer.force();
+            if (forceWrites) mappedBuffer.force();
+        } else {
+            resize(bucketNumber * RESIZE_COEFFICIENT);      // increasing number of buckets in RESIZE_COEFFICIENT times
+            put(key, value);                                // and starting put() operation over
+        }
     }
 
     @Override
     public AvailabilityItem get(long key) {
         int bucketIdx = getBucketIdxByKey(key);
-        byte[] bucket = readBucketByIdx(bucketIdx),
-                binaryRecord = new byte[RECORD_SIZE];
+        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
+                binaryRecord = new byte[BinaryRecord.RECORD_SIZE];
 
         int recordIdx = lookupInBucket(key, bucket, binaryRecord);
 
@@ -117,8 +292,8 @@ public class HashMapMMAPStorage implements Storage {
     @Override
     public AvailabilityItem remove(long key) {
         int bucketIdx = getBucketIdxByKey(key);
-        byte[] bucket = readBucketByIdx(bucketIdx),
-                record = new byte[RECORD_SIZE];
+        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
+                record = new byte[BinaryRecord.RECORD_SIZE];
 
         int recordIdx = lookupInBucket(key, bucket, record);
         if (recordIdx < 0) return null;
@@ -130,13 +305,14 @@ public class HashMapMMAPStorage implements Storage {
         );
 
         int bucketSize = BinaryBucket.getSize(bucket);
-        if (recordIdx == bucketSize - 1) {                                      // if it's a last record in bucket
-            writeRecordByIdx(bucketIdx, recordIdx, new byte[RECORD_SIZE]);      // replacing it with zeros
-        } else {                                                                // otherwise
-            moveRecordByIdx(bucketIdx, bucketSize - 1, recordIdx);              // moving the last record insted of this one
+        if (recordIdx == bucketSize - 1) {                                          // if it's a last record in bucket
+                                                                                    // replacing it with zeros
+            writeRecordByIdx(bucketIdx, recordIdx, new byte[BinaryRecord.RECORD_SIZE], mappedBuffer);
+        } else {                                                                    // otherwise
+            moveRecordByIdx(bucketIdx, bucketSize - 1, recordIdx, mappedBuffer);    // moving the last record instead of this one
         }
-        writeBucketSize(bucketIdx, bucketSize - 1);                             // and updating the bucket size
-        if (forceWrites) buffer.force();
+        writeBucketSize(bucketIdx, bucketSize - 1, mappedBuffer);                   // and updating the bucket size
+        if (forceWrites) mappedBuffer.force();
 
         return item;
     }
@@ -153,11 +329,11 @@ public class HashMapMMAPStorage implements Storage {
      */
     private int lookupInBucket(long key, byte[] bucket, byte[] targetBinaryRecord) {
         int bucketSize = BinaryBucket.getSize(bucket);
-        byte[] record = new byte[RECORD_SIZE];
+        byte[] record = new byte[BinaryRecord.RECORD_SIZE];
         for (int rcdIdx = 0; rcdIdx < bucketSize; rcdIdx++) {
             readRecordFromBucket(rcdIdx, bucket, record);
             if (BinaryRecord.getKey(record) == key) {
-                System.arraycopy(record, 0, targetBinaryRecord, 0, RECORD_SIZE);
+                System.arraycopy(record, 0, targetBinaryRecord, 0, BinaryRecord.RECORD_SIZE);
                 return rcdIdx;
             }
         }
@@ -172,8 +348,110 @@ public class HashMapMMAPStorage implements Storage {
      * @return bucket index
      */
     protected int getBucketIdxByKey(long key) {
+        return getBucketIdxByKey(key, bucketNumber);
+    }
+
+    /**
+     * Calculates bucket index for the provided key and the specified
+     * number of buckets.
+     *
+     * @param key target key
+     * @param bucketNumber total number of buckets
+     * @return bucket index
+     */
+    protected int getBucketIdxByKey(long key, int bucketNumber) {
         int hashCode = Math.abs(AvailabilityItem.keyToHashCode(key));
         return hashCode % bucketNumber;
+    }
+
+    /**
+     * Increases number of buckets in the storage and redistributes all records
+     * between the new buckets.
+     *
+     * Method creates a temporary byte buffer which is used as a temporary storage
+     * during the resize operation. The <b>original mapped buffer remains untouched
+     * until the all records are redistributed</b> between new buckets. Therefore it
+     * can be used for reads when the resize is in progress.
+     *
+     * @param newBucketNumber new number of buckets
+     */
+    private void resize(int newBucketNumber) {
+        if (newBucketNumber <= bucketNumber) return;
+
+        log.debug("Resize started");
+
+        verifyAllocatedSpace(newBucketNumber);
+        prepareBuffers(newBucketNumber);
+
+        long key;
+        byte[] rcd = new byte[BinaryRecord.RECORD_SIZE], bkt, tgtBkt;
+        int bktIdx, rcdIdx, tgtBktIdx, bktSize, tgtBktSize;
+
+        for (bktIdx = 0; bktIdx < bucketNumber; bktIdx++) {                     // iterating over existing buckets
+            bkt = readBucketByIdx(bktIdx, mappedBuffer);
+            bktSize = BinaryBucket.getSize(bkt);
+            for (rcdIdx = 0; rcdIdx < bktSize; rcdIdx++) {                      // iterating over current bucket records
+                                                                                // and moving each record to a new bucket
+                readRecordFromBucket(rcdIdx, bkt, rcd);
+                key = BinaryRecord.getKey(rcd);
+                tgtBktIdx = getBucketIdxByKey(key, newBucketNumber);
+
+                ByteBuffer targetBuffer = (tgtBktIdx < bucketNumber) ? tmpBuffer : mappedBuffer;    // we should not override original buckets
+                tgtBkt = readBucketByIdx(tgtBktIdx, targetBuffer);              // target bucket to place the record
+                tgtBktSize = BinaryBucket.getSize(tgtBkt);                      // new record position
+                writeRecordByIdx(tgtBktIdx, tgtBktSize, rcd, targetBuffer);     // writing record to the target bucket on targetBktSize position
+                writeBucketSize(tgtBktIdx, tgtBktSize + 1, targetBuffer);       // and updating bucket size
+            }
+        }
+
+        copyAndReleaseTmpBuffer();
+        writeStorageHeader(mappedBuffer, newBucketNumber, bucketCapacity);
+        bucketNumber = newBucketNumber;
+
+        mappedBuffer.force();
+
+        log.debug("Resize finished (new bucket number is " + bucketNumber + ")");
+    }
+
+    /**
+     * Current method prepares mapped buffer and temp buffer
+     * for the resize operation.
+     *
+     * Required additional buckets in mapped buffer are initialized.
+     * Temporary N buckets are created in temp buffer, where N is current
+     * number of buckets in the mapped buffer.
+     *
+     * @param newBucketNumber total number of buckets in a buffer after resize
+     */
+    private void prepareBuffers(int newBucketNumber) {
+        int mappedBufferSize = STORAGE_HEADER_SIZE + bucketNumber * bucketSize;
+        int numOfBktToInit = newBucketNumber - bucketNumber;
+        initBuckets(mappedBuffer, numOfBktToInit, mappedBufferSize);    // initializing additional buckets in the main buffer
+
+        tmpBuffer = ByteBuffer.allocate(mappedBufferSize);              // additional buffer for existing buckets
+        initEmptyByteBuffer(tmpBuffer, bucketNumber, bucketCapacity);       // initializing additional buffer
+    }
+
+    /**
+     * Copies all data from the temp byte buffer into the mapped byte buffer
+     * and releases temp buffer.
+     */
+    private void copyAndReleaseTmpBuffer() {
+        int byteNum = tmpBuffer.capacity(),
+            byteIdx = 0;
+        tmpBuffer.flip();                       // prepare buffer for read
+        while (byteIdx < byteNum) {             // copying bytes to the mapped buffer
+            try {
+                byte b = tmpBuffer.get(byteIdx);
+                mappedBuffer.put(byteIdx++, b);
+            } catch (IndexOutOfBoundsException e) {
+                log.error("byteIdx = " + byteIdx + ", byteNum = " + byteNum, e);
+                throw new RuntimeException(e);
+            }
+        }
+
+        tmpBuffer.clear();
+        tmpBuffer = null;                       // release temp buffer
     }
 
     /**
@@ -185,13 +463,19 @@ public class HashMapMMAPStorage implements Storage {
      * @param targetRcd target record array
      */
     private void readRecordFromBucket(int rcdIdx, byte[] bucket, byte [] targetRcd) {
-        if (rcdIdx >= BUCKET_CAPACITY) throw new IllegalArgumentException("rcdIdx >= BUCKET_CAPACITY");
-        if (bucket.length != BUCKET_SIZE) throw new IllegalArgumentException("Invalid bucket size");
-        if (targetRcd.length != RECORD_SIZE) throw new IllegalArgumentException("Invalid record size");
+        if (rcdIdx >= bucketCapacity) throw new IllegalArgumentException("rcdIdx >= bucketCapacity");
+        if (bucket.length != bucketSize) throw new IllegalArgumentException("Invalid bucket size");
+        if (targetRcd.length != BinaryRecord.RECORD_SIZE) throw new IllegalArgumentException("Invalid record size");
 
-        int recordOffset = BinaryBucket.BUCKET_FIRST_RECORD_OFFSET + RECORD_SIZE * rcdIdx;
-        System.arraycopy(bucket, recordOffset, targetRcd, 0, RECORD_SIZE);
+        int recordOffset = BinaryBucket.BUCKET_HEADER_SIZE + BinaryRecord.RECORD_SIZE * rcdIdx;
+        System.arraycopy(bucket, recordOffset, targetRcd, 0, BinaryRecord.RECORD_SIZE);
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    //                                                                                            //
+    //                              PRIMITIVE OPERATIONS ON BUFFERS.                              //
+    //                                                                                            //
+    ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /**
      * Fetches a bucket in a binary format by it's index (ordinal number).
@@ -199,11 +483,11 @@ public class HashMapMMAPStorage implements Storage {
      * @param bktIdx bucket ordinal number
      * @return bucket as a byte array
      */
-    private byte[] readBucketByIdx(int bktIdx) {
-        if (bktIdx >= bucketNumber) throw new IllegalArgumentException("bktIdx >= bucketNumber");
+    private byte[] readBucketByIdx(int bktIdx, ByteBuffer buffer) {
+//        if (bktIdx >= bucketNumber) throw new IllegalArgumentException("bktIdx >= bucketNumber");
 
-        int bktAddress = STORAGE_HEADER_SIZE + bktIdx * BUCKET_SIZE;
-        return readBucket(bktAddress);
+        int bktAddress = STORAGE_HEADER_SIZE + bktIdx * bucketSize;
+        return readBucket(bktAddress, buffer);
     }
 
     /**
@@ -212,9 +496,9 @@ public class HashMapMMAPStorage implements Storage {
      * @param bktAddress address of the record
      * @return byte array containing record in a binary format
      */
-    private byte[] readBucket(int bktAddress) {
-        byte[] byteBucket = new byte[BUCKET_SIZE];
-        for (int bufAddress = bktAddress, byteIdx = 0; bufAddress < bktAddress + BUCKET_SIZE; bufAddress++) {
+    private byte[] readBucket(int bktAddress, ByteBuffer buffer) {
+        byte[] byteBucket = new byte[bucketSize];
+        for (int bufAddress = bktAddress, byteIdx = 0; bufAddress < bktAddress + bucketSize; bufAddress++) {
             try {
                 byteBucket[byteIdx++] = buffer.get(bufAddress);
             } catch (IndexOutOfBoundsException e) {
@@ -227,27 +511,30 @@ public class HashMapMMAPStorage implements Storage {
     }
 
     /**
-     * Writes the record into the specified bucket on the specified position.
+     * Writes the record into the specified bucket on the specified position
+     * to the specified buffer.
      *
      * @param bucketIdx bucket index
      * @param rcdIdx record index
      * @param rcd record as a byte array
+     * @param buffer target buffer
      */
-    private void writeRecordByIdx(int bucketIdx, int rcdIdx, byte[] rcd) {
-        int bktAddress = STORAGE_HEADER_SIZE + bucketIdx * BUCKET_SIZE;
-        int rcdAddress = bktAddress + BinaryBucket.BUCKET_FIRST_RECORD_OFFSET + rcdIdx * RECORD_SIZE;
-        writeRecord(rcdAddress, rcd);
+    private void writeRecordByIdx(int bucketIdx, int rcdIdx, byte[] rcd, ByteBuffer buffer) {
+        int bktAddress = STORAGE_HEADER_SIZE + bucketIdx * bucketSize;
+        int rcdAddress = bktAddress + BinaryBucket.BUCKET_HEADER_SIZE + rcdIdx * BinaryRecord.RECORD_SIZE;
+        writeRecord(rcdAddress, rcd, buffer);
     }
 
     /**
      * Writes the record into the buffer by the specified address.
      * @param rcdAddress record address
      * @param rcd record as a byte array
+     * @param buffer target buffer
      */
-    private void writeRecord(int rcdAddress, byte[] rcd) {
-        if (rcd.length != RECORD_SIZE) throw new IllegalArgumentException("rcd.length != RECORD_SIZE");
+    private void writeRecord(int rcdAddress, byte[] rcd, ByteBuffer buffer) {
+        if (rcd.length != BinaryRecord.RECORD_SIZE) throw new IllegalArgumentException("rcd.length != BinaryRecord.RECORD_SIZE");
 
-        for (int bufAddress = rcdAddress, byteIdx = 0; bufAddress < rcdAddress + RECORD_SIZE; bufAddress++) {
+        for (int bufAddress = rcdAddress, byteIdx = 0; bufAddress < rcdAddress + BinaryRecord.RECORD_SIZE; bufAddress++) {
             buffer.put(bufAddress, rcd[byteIdx++]);
         }
     }
@@ -260,12 +547,12 @@ public class HashMapMMAPStorage implements Storage {
      * @param fromRcdIdx current record index
      * @param toRcdIdx new record index
      */
-    private void moveRecordByIdx(int bktIdx, int fromRcdIdx, int toRcdIdx) {
-        int bucketAddress = STORAGE_HEADER_SIZE + bktIdx * BUCKET_SIZE;
-        int fromAddress = bucketAddress + BinaryBucket.BUCKET_FIRST_RECORD_OFFSET + fromRcdIdx * RECORD_SIZE;
-        int toAddress = bucketAddress + BinaryBucket.BUCKET_FIRST_RECORD_OFFSET + toRcdIdx * RECORD_SIZE;
+    private void moveRecordByIdx(int bktIdx, int fromRcdIdx, int toRcdIdx, ByteBuffer buffer) {
+        int bucketAddress = STORAGE_HEADER_SIZE + bktIdx * bucketSize;
+        int fromAddress = bucketAddress + BinaryBucket.BUCKET_HEADER_SIZE + fromRcdIdx * BinaryRecord.RECORD_SIZE;
+        int toAddress = bucketAddress + BinaryBucket.BUCKET_HEADER_SIZE + toRcdIdx * BinaryRecord.RECORD_SIZE;
 
-        moveRecord(fromAddress, toAddress);
+        moveRecord(fromAddress, toAddress, buffer);
     }
 
     /**
@@ -275,11 +562,11 @@ public class HashMapMMAPStorage implements Storage {
      * @param fromAddress source record address
      * @param toAddress destination address
      */
-    private void moveRecord(int fromAddress, int toAddress) {
-        for (int byteIdx = 0; byteIdx < RECORD_SIZE; byteIdx++) {
+    private void moveRecord(int fromAddress, int toAddress, ByteBuffer buffer) {
+        for (int byteIdx = 0; byteIdx < BinaryRecord.RECORD_SIZE; byteIdx++) {
             int currentFromAddress = fromAddress + byteIdx;
-            buffer.put(toAddress + byteIdx, buffer.get(currentFromAddress));
-            buffer.put(currentFromAddress, (byte)0);
+            buffer.put(toAddress + byteIdx, mappedBuffer.get(currentFromAddress));
+            buffer.put(currentFromAddress, (byte) 0);
         }
     }
 
@@ -289,10 +576,31 @@ public class HashMapMMAPStorage implements Storage {
      * @param bucketIdx bucket index
      * @param newSize size
      */
-    private void writeBucketSize(int bucketIdx, int newSize) {
-        int bktAddress = STORAGE_HEADER_SIZE + bucketIdx * BUCKET_SIZE;
+    private void writeBucketSize(int bucketIdx, int newSize, ByteBuffer buffer) {
+        int bktAddress = STORAGE_HEADER_SIZE + bucketIdx * bucketSize;
         int bktSizeAddress = bktAddress + BinaryBucket.BUCKET_SIZE_OFFSET;
         buffer.putInt(bktSizeAddress, newSize);
+    }
+
+
+    /**
+     * Reads the number of buckets in storage from the specified byte buffer.
+     *
+     * @param buffer source byte buffer
+     * @return number of initialized buckets
+     */
+    private int readStorageBktNum(ByteBuffer buffer) {
+        return buffer.getInt(STORAGE_BUCKET_NUM_OFFSET);
+    }
+
+    /**
+     * Reads the bucket capacity of storage from the specified byte buffer.
+     *
+     * @param buffer source byte buffer
+     * @return bucket capacity
+     */
+    private int readStorageBktCapacity(ByteBuffer buffer) {
+        return buffer.getInt(STORAGE_BUCKET_CAP_OFFSET);
     }
 
     /**
@@ -301,32 +609,32 @@ public class HashMapMMAPStorage implements Storage {
      */
     protected final static class BinaryBucket {
         public static final int BUCKET_SIZE_OFFSET = 0;             // int
-        public static final int BUCKET_FIRST_RECORD_OFFSET = 4;     // the rest
+        public static final int BUCKET_HEADER_SIZE = 4;             // the rest
 
-        private BinaryBucket(){}
+        private BinaryBucket() {}
 
         public static void setSize(int size, byte[] bucket) {
-            verifyBucket(bucket);
             ByteUtils.putInt(size, bucket, BUCKET_SIZE_OFFSET);
         }
 
         public static int getSize(byte[] bucket) {
-            verifyBucket(bucket);
-            int bucketSize = ByteUtils.getInt(bucket, BUCKET_SIZE_OFFSET);
-            return bucketSize;
-        }
-
-        private static void verifyBucket(byte[] bucket) {
-            if (bucket.length != BUCKET_SIZE)
-                throw new IllegalArgumentException("Record size constraint violation (" + bucket.length + " instead of " + RECORD_SIZE + ")");
+            return ByteUtils.getInt(bucket, BUCKET_SIZE_OFFSET);
         }
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    //                                                                                            //
+    //       UTILITARIAN CLASSES CONTAINING METHODS TO PERFORM SOME PRIMITIVE BYTE OPERATION      //
+    //                                                                                            //
+    ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /**
      * Current class provides utility methods to operate with binary records
      * like with an object.
      */
     protected final static class BinaryRecord {
+        public static final int RECORD_SIZE = 8 + 4 + 2 + 4;    // key:long + sku:int + store:short + amount:int = 18
+
         public static final int RECORD_KEY_OFFSET = 0;          // long
         public static final int RECORD_SKU_OFFSET = 8;          // int
         public static final int RECORD_STORE_OFFSET = 12;       // short
@@ -426,13 +734,5 @@ public class HashMapMMAPStorage implements Storage {
             }
             return value;
         }
-    }
-
-    private static byte[] getFirstBytes(MappedByteBuffer buffer, int n) {
-        byte[] bytes = new byte[n];
-        for (int i=0; i<n; i++) {
-            bytes[i] = buffer.get(i);
-        }
-        return bytes;
     }
 }

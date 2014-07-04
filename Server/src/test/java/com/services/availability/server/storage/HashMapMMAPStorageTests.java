@@ -1,8 +1,6 @@
 package com.services.availability.server.storage;
 
-import com.services.availability.protocol.binary.BinaryRequestType;
 import junit.framework.Assert;
-import junit.framework.AssertionFailedError;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -25,7 +23,7 @@ public class HashMapMMAPStorageTests {
 
     @Test
     public void byteRecordTestsA() {
-        byte [] record = new byte[HashMapMMAPStorage.RECORD_SIZE];
+        byte [] record = new byte[HashMapMMAPStorage.BinaryRecord.RECORD_SIZE];
         long key = 2398436448724698204L;
         int sku = 436346343;
         short store = 892;
@@ -49,7 +47,7 @@ public class HashMapMMAPStorageTests {
 
     @Test
     public void byteRecordTestsB() {
-        byte [] record = new byte[HashMapMMAPStorage.RECORD_SIZE];
+        byte [] record = new byte[HashMapMMAPStorage.BinaryRecord.RECORD_SIZE];
         long key = -2398436448724698204L;
         int sku = -436346343;
         short store = -235;
@@ -73,7 +71,7 @@ public class HashMapMMAPStorageTests {
 
     @Test
     public void byteRecordTestsC() {
-        byte [] record = new byte[HashMapMMAPStorage.RECORD_SIZE];
+        byte [] record = new byte[HashMapMMAPStorage.BinaryRecord.RECORD_SIZE];
         long key = 1;
         int sku = -1;
         short store = 128;
@@ -154,22 +152,17 @@ public class HashMapMMAPStorageTests {
         System.out.println("Initialized");
         List<AvailabilityItem> addedItems = new ArrayList<AvailabilityItem>(12000);
         List<AvailabilityItem> notAddedItems = new ArrayList<AvailabilityItem>(8000);
-        HashMap<Integer, Integer> stat = new HashMap<Integer, Integer>();
 
-        for (int i=0; i<10000; i++)
+        for (int i=0; i<100000; i++)
             notAddedItems.add(new AvailabilityItem(getSku(), getStore(), getAmount()));
 
-        for (int i=0; i<10000; i++) {
+        for (int i=0; i<100000; i++) {
             if (i > 0 && i % 10000 == 0) System.out.println(i + " passed");
             AvailabilityItem item = new AvailabilityItem(getSku(), getStore(), getAmount());
             try {
                 if (storage.get(item.key()) == null) {
                     storage.put(item.key(), item);
                     addedItems.add(item);
-
-                    int bucketNum = storage.getBucketIdxByKey(item.key());
-                    if (!stat.containsKey(bucketNum)) stat.put(bucketNum, 0);
-                    stat.put(bucketNum, stat.get(bucketNum) + 1);
                 }
             } catch (RuntimeException e) {
                 e.printStackTrace();
@@ -179,34 +172,18 @@ public class HashMapMMAPStorageTests {
         System.out.println("Assertions started");
 
         // optimistic test
-        int nn = 0;
         for (AvailabilityItem item: addedItems) {
             AvailabilityItem restoredItem = storage.get(item.key());
-
-            try {
-                assertNotNull(restoredItem);
-                assertEquals(item.getSku(), restoredItem.getSku());
-                assertEquals(item.getStore(), restoredItem.getStore());
-                assertEquals(item.getAmount(), restoredItem.getAmount());
-            } catch (AssertionFailedError e) {
-                e.printStackTrace();
-                System.out.println("n = " + nn);
-                System.out.println(item.getSku() + " - " + restoredItem.getSku());
-                System.out.println(item.getStore() + " - " + restoredItem.getStore());
-                System.out.println(item.getAmount() + " - " + restoredItem.getAmount());
-            }
-            nn++;
+            assertNotNull(restoredItem);
+            assertEquals(item.getSku(), restoredItem.getSku());
+            assertEquals(item.getStore(), restoredItem.getStore());
+            assertEquals(item.getAmount(), restoredItem.getAmount());
         }
 
         // pessimistic test
         for (AvailabilityItem item: notAddedItems) {
             AvailabilityItem restoredItem = storage.get(item.key());
             assertNull(restoredItem);
-        }
-
-        for (int i=0; i<1024 * 1024; i++) {
-            Integer n = stat.get(i);
-            if (n != null && n > 15) System.out.println(i + " - " + n);
         }
     }
 
