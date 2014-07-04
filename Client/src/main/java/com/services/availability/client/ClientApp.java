@@ -46,12 +46,12 @@ public class ClientApp {
                 } else {
                     client.performRequest(requestGenerator.getRequest());
                 }
-                Thread.sleep(1);
+//                Thread.sleep(1);
 
             } catch (IOException e) {
                 log.error("Cannot perform request", e);
-            } catch (InterruptedException e) {
-                log.error("Interrupted");
+//            } catch (InterruptedException e) {
+//                log.error("Interrupted");
             }
         }
     }
