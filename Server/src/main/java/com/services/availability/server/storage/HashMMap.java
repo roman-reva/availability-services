@@ -13,9 +13,9 @@ import java.nio.channels.FileChannel;
 /**
  * @author Roman Reva
  * @version 1.0
- * @since 2014-07-01 14:28
+ * @since 2014-07-08 14:43
  */
-public class HashMapMMAPStorage implements Storage {
+public class HashMMap {
     public static final String STORAGE_FILE = "data.dat";       // storage filename
 
     public static final int STORAGE_SIZE = 1024*1024*1024;      // 1 GB
@@ -27,7 +27,7 @@ public class HashMapMMAPStorage implements Storage {
     public static final int DEFAULT_BUCKET_CAPACITY = 32;
     public static final int RESIZE_COEFFICIENT = 4;             // resize multiplier
 
-    private static Logger log = Logger.getLogger(HashMapMMAPStorage.class);
+    private static Logger log = Logger.getLogger(HashMMap.class);
 
     private final MappedByteBuffer mappedBuffer;                // main storage buffer, mmaped to the file system
     private ByteBuffer tmpBuffer;                               // temporary buffer, allocated during the resize operation
@@ -49,7 +49,7 @@ public class HashMapMMAPStorage implements Storage {
      * If file doesn't exist, it is been created, the data structure is initialized and
      * storage parameters to the default values.
      */
-    public HashMapMMAPStorage() {
+    public HashMMap() {
         boolean storageExists = storageFileExists();
         this.mappedBuffer = bindMappedBuffer();
 
@@ -82,7 +82,7 @@ public class HashMapMMAPStorage implements Storage {
      * @param initialBucketNumber initial number of buckets
      * @param bucketCapacity number of records in a bucket
      */
-    public HashMapMMAPStorage(int initialBucketNumber, int bucketCapacity) {
+    public HashMMap(int initialBucketNumber, int bucketCapacity) {
         boolean storageExists = storageFileExists();
         this.mappedBuffer = bindMappedBuffer();
 
@@ -237,9 +237,6 @@ public class HashMapMMAPStorage implements Storage {
         }
     }
 
-
-
-    @Override
     public void put(long key, AvailabilityItem value) {
         int bucketIdx = getBucketIdxByKey(key);
         byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
@@ -270,7 +267,6 @@ public class HashMapMMAPStorage implements Storage {
         }
     }
 
-    @Override
     public AvailabilityItem get(long key) {
         int bucketIdx = getBucketIdxByKey(key);
         byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
@@ -288,8 +284,6 @@ public class HashMapMMAPStorage implements Storage {
         );
     }
 
-
-    @Override
     public AvailabilityItem remove(long key) {
         int bucketIdx = getBucketIdxByKey(key);
         byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
@@ -306,7 +300,7 @@ public class HashMapMMAPStorage implements Storage {
 
         int bucketSize = BinaryBucket.getSize(bucket);
         if (recordIdx == bucketSize - 1) {                                          // if it's a last record in bucket
-                                                                                    // replacing it with zeros
+            // replacing it with zeros
             writeRecordByIdx(bucketIdx, recordIdx, new byte[BinaryRecord.RECORD_SIZE], mappedBuffer);
         } else {                                                                    // otherwise
             moveRecordByIdx(bucketIdx, bucketSize - 1, recordIdx, mappedBuffer);    // moving the last record instead of this one
@@ -391,7 +385,7 @@ public class HashMapMMAPStorage implements Storage {
             bkt = readBucketByIdx(bktIdx, mappedBuffer);
             bktSize = BinaryBucket.getSize(bkt);
             for (rcdIdx = 0; rcdIdx < bktSize; rcdIdx++) {                      // iterating over current bucket records
-                                                                                // and moving each record to a new bucket
+                // and moving each record to a new bucket
                 readRecordFromBucket(rcdIdx, bkt, rcd);
                 key = BinaryRecord.getKey(rcd);
                 tgtBktIdx = getBucketIdxByKey(key, newBucketNumber);
@@ -438,7 +432,7 @@ public class HashMapMMAPStorage implements Storage {
      */
     private void copyAndReleaseTmpBuffer() {
         int byteNum = tmpBuffer.capacity(),
-            byteIdx = 0;
+                byteIdx = 0;
         tmpBuffer.flip();                       // prepare buffer for read
         while (byteIdx < byteNum) {             // copying bytes to the mapped buffer
             try {
@@ -735,4 +729,5 @@ public class HashMapMMAPStorage implements Storage {
             return value;
         }
     }
+
 }

@@ -17,27 +17,27 @@ import static junit.framework.Assert.assertNull;
  * @version 1.0
  * @since 2014-07-01 15:00
  */
-public class HashMapMMAPStorageTests {
+public class HashMMapTests {
 
     private Random random = new Random();
 
     @Test
     public void byteRecordTestsA() {
-        byte [] record = new byte[HashMapMMAPStorage.BinaryRecord.RECORD_SIZE];
+        byte [] record = new byte[HashMMap.BinaryRecord.RECORD_SIZE];
         long key = 2398436448724698204L;
         int sku = 436346343;
         short store = 892;
         int amount = 89235664;
 
-        HashMapMMAPStorage.BinaryRecord.setKey(key, record);
-        HashMapMMAPStorage.BinaryRecord.setSku(sku, record);
-        HashMapMMAPStorage.BinaryRecord.setStore(store, record);
-        HashMapMMAPStorage.BinaryRecord.setAmount(amount, record);
+        HashMMap.BinaryRecord.setKey(key, record);
+        HashMMap.BinaryRecord.setSku(sku, record);
+        HashMMap.BinaryRecord.setStore(store, record);
+        HashMMap.BinaryRecord.setAmount(amount, record);
 
-        long restoredKey = HashMapMMAPStorage.BinaryRecord.getKey(record);
-        int restoredSku = HashMapMMAPStorage.BinaryRecord.getSku(record);
-        short restoredStore = HashMapMMAPStorage.BinaryRecord.getStore(record);
-        int restoredAmount = HashMapMMAPStorage.BinaryRecord.getAmount(record);
+        long restoredKey = HashMMap.BinaryRecord.getKey(record);
+        int restoredSku = HashMMap.BinaryRecord.getSku(record);
+        short restoredStore = HashMMap.BinaryRecord.getStore(record);
+        int restoredAmount = HashMMap.BinaryRecord.getAmount(record);
 
         Assert.assertEquals(key, restoredKey);
         Assert.assertEquals(sku, restoredSku);
@@ -47,21 +47,21 @@ public class HashMapMMAPStorageTests {
 
     @Test
     public void byteRecordTestsB() {
-        byte [] record = new byte[HashMapMMAPStorage.BinaryRecord.RECORD_SIZE];
+        byte [] record = new byte[HashMMap.BinaryRecord.RECORD_SIZE];
         long key = -2398436448724698204L;
         int sku = -436346343;
         short store = -235;
         int amount = -89235664;
 
-        HashMapMMAPStorage.BinaryRecord.setKey(key, record);
-        HashMapMMAPStorage.BinaryRecord.setSku(sku, record);
-        HashMapMMAPStorage.BinaryRecord.setStore(store, record);
-        HashMapMMAPStorage.BinaryRecord.setAmount(amount, record);
+        HashMMap.BinaryRecord.setKey(key, record);
+        HashMMap.BinaryRecord.setSku(sku, record);
+        HashMMap.BinaryRecord.setStore(store, record);
+        HashMMap.BinaryRecord.setAmount(amount, record);
 
-        long restoredKey = HashMapMMAPStorage.BinaryRecord.getKey(record);
-        int restoredSku = HashMapMMAPStorage.BinaryRecord.getSku(record);
-        short restoredStore = HashMapMMAPStorage.BinaryRecord.getStore(record);
-        int restoredAmount = HashMapMMAPStorage.BinaryRecord.getAmount(record);
+        long restoredKey = HashMMap.BinaryRecord.getKey(record);
+        int restoredSku = HashMMap.BinaryRecord.getSku(record);
+        short restoredStore = HashMMap.BinaryRecord.getStore(record);
+        int restoredAmount = HashMMap.BinaryRecord.getAmount(record);
 
         Assert.assertEquals(key, restoredKey);
         Assert.assertEquals(sku, restoredSku);
@@ -71,21 +71,21 @@ public class HashMapMMAPStorageTests {
 
     @Test
     public void byteRecordTestsC() {
-        byte [] record = new byte[HashMapMMAPStorage.BinaryRecord.RECORD_SIZE];
+        byte [] record = new byte[HashMMap.BinaryRecord.RECORD_SIZE];
         long key = 1;
         int sku = -1;
         short store = 128;
         int amount = -1024;
 
-        HashMapMMAPStorage.BinaryRecord.setKey(key, record);
-        HashMapMMAPStorage.BinaryRecord.setSku(sku, record);
-        HashMapMMAPStorage.BinaryRecord.setStore(store, record);
-        HashMapMMAPStorage.BinaryRecord.setAmount(amount, record);
+        HashMMap.BinaryRecord.setKey(key, record);
+        HashMMap.BinaryRecord.setSku(sku, record);
+        HashMMap.BinaryRecord.setStore(store, record);
+        HashMMap.BinaryRecord.setAmount(amount, record);
 
-        long restoredKey = HashMapMMAPStorage.BinaryRecord.getKey(record);
-        int restoredSku = HashMapMMAPStorage.BinaryRecord.getSku(record);
-        short restoredStore = HashMapMMAPStorage.BinaryRecord.getStore(record);
-        int restoredAmount = HashMapMMAPStorage.BinaryRecord.getAmount(record);
+        long restoredKey = HashMMap.BinaryRecord.getKey(record);
+        int restoredSku = HashMMap.BinaryRecord.getSku(record);
+        short restoredStore = HashMMap.BinaryRecord.getStore(record);
+        int restoredAmount = HashMMap.BinaryRecord.getAmount(record);
 
         Assert.assertEquals(key, restoredKey);
         Assert.assertEquals(sku, restoredSku);
@@ -121,7 +121,7 @@ public class HashMapMMAPStorageTests {
 
     @Test
     public void simpleIntegrationTest() {
-        HashMapMMAPStorage storage = new HashMapMMAPStorage();
+        HashMMap storage = new HashMMap();
 
         AvailabilityItem item = new AvailabilityItem(12509, (short)23, 399);
 
@@ -147,7 +147,7 @@ public class HashMapMMAPStorageTests {
 
     @Test
     public void randomIntegrationTest() {
-        HashMapMMAPStorage storage = new HashMapMMAPStorage();
+        HashMMap storage = new HashMMap();
 
         System.out.println("Initialized");
         List<AvailabilityItem> addedItems = new ArrayList<AvailabilityItem>(12000);
