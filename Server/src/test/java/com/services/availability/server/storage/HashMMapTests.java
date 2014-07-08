@@ -1,6 +1,7 @@
 package com.services.availability.server.storage;
 
 import junit.framework.Assert;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -20,6 +21,12 @@ import static junit.framework.Assert.assertNull;
 public class HashMMapTests {
 
     private Random random = new Random();
+
+    @Before
+    public void init() {
+        HashMMap hashMMap = new HashMMap();
+        hashMMap.clear();
+    }
 
     @Test
     public void byteRecordTestsA() {

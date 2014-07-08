@@ -9,6 +9,7 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * @author Roman Reva
@@ -36,7 +37,38 @@ public class HashMMap {
     private final int bucketSize;                               // number of bytes allocated for bucket
     private int bucketNumber;                                   // current number of buckets in the storage
 
-    private boolean forceWrites = true;                         // flush of the mmaped buffer required after put/remove
+    private boolean flushAfterPut = true;                       // flush of the mmaped buffer required after each put
+
+    /**
+     * Initializes the storage. First an attempt to restore data from file
+     * is made.
+     *
+     * If file exists its structure is verified. If errors in headers are found, an
+     * exception is thrown. Otherwise, file is considered as valid and is used as storage.
+     *
+     * If file doesn't exist, it is been created, the data structure is initialized and
+     * storage parameters to the default values.
+     */
+    public HashMMap(boolean flushAfterPut) {
+        this.flushAfterPut = flushAfterPut;
+        boolean storageExists = storageFileExists();
+        this.mappedBuffer = bindMappedBuffer();
+
+        if (storageExists) {
+            this.bucketNumber = readStorageBktNum(mappedBuffer);
+            this.bucketCapacity = readStorageBktCapacity(mappedBuffer);
+            this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
+
+            verifyNonEmptyMappedBuffer();
+        } else {
+            this.bucketNumber = DEFAULT_INITIAL_BUCKET_NUMBER;
+            this.bucketCapacity = DEFAULT_BUCKET_CAPACITY;
+            this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
+
+            verifyAllocatedSpace(bucketNumber);     // verifying that storage file has enough space for data structure
+            initEmptyMappedBuffer();
+        }
+    }
 
 
     /**
@@ -251,7 +283,7 @@ public class HashMMap {
 
         if (recordIdx >= 0) {                                               // if record with such key already exists
             writeRecordByIdx(bucketIdx, recordIdx, record, mappedBuffer);   // then updating the record data
-            if (forceWrites) mappedBuffer.force();
+            if (flushAfterPut) mappedBuffer.force();
             return;
         }
 
@@ -260,11 +292,18 @@ public class HashMMap {
             writeRecordByIdx(bucketIdx, bucketSize, record, mappedBuffer);  // writing the record to the end of the bucket
             writeBucketSize(bucketIdx, bucketSize + 1, mappedBuffer);       // and updating the bucket size
 
-            if (forceWrites) mappedBuffer.force();
+            if (flushAfterPut) mappedBuffer.force();
         } else {
             resize(bucketNumber * RESIZE_COEFFICIENT);      // increasing number of buckets in RESIZE_COEFFICIENT times
             put(key, value);                                // and starting put() operation over
         }
+    }
+
+    public void putAll(ConcurrentHashMap<Long,AvailabilityItem> hashMap) {
+        for (long key: hashMap.keySet()) {
+            this.put(key, hashMap.get(key));
+        }
+        mappedBuffer.force();
     }
 
     public AvailabilityItem get(long key) {
@@ -306,9 +345,16 @@ public class HashMMap {
             moveRecordByIdx(bucketIdx, bucketSize - 1, recordIdx, mappedBuffer);    // moving the last record instead of this one
         }
         writeBucketSize(bucketIdx, bucketSize - 1, mappedBuffer);                   // and updating the bucket size
-        if (forceWrites) mappedBuffer.force();
+        mappedBuffer.force();
 
         return item;
+    }
+
+    public void clear() {
+        bucketNumber = DEFAULT_INITIAL_BUCKET_NUMBER;
+        initEmptyMappedBuffer();
+
+        log.debug("HashMMap cleared (bktNum = " + bucketNumber + ")");
     }
 
     /**
@@ -374,6 +420,7 @@ public class HashMMap {
 
         log.debug("Resize started");
 
+        mappedBuffer.force();
         verifyAllocatedSpace(newBucketNumber);
         prepareBuffers(newBucketNumber);
 
