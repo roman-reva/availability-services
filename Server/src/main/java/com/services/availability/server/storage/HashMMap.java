@@ -9,6 +9,7 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -269,6 +270,12 @@ public class HashMMap {
         }
     }
 
+    /**
+     * Puts the element <i>value</i> into the collection by the specified <i>key</i>.
+     *
+     * @param key element key
+     * @param value value to put
+     */
     public void put(long key, AvailabilityItem value) {
         int bucketIdx = getBucketIdxByKey(key);
         byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
@@ -299,13 +306,26 @@ public class HashMMap {
         }
     }
 
-    public void putAll(ConcurrentHashMap<Long,AvailabilityItem> hashMap) {
+    /**
+     * Performs put of all elements from the provided map.
+     *
+     * @param hashMap source map
+     */
+    public void putAll(Map<Long,AvailabilityItem> hashMap) {
         for (long key: hashMap.keySet()) {
             this.put(key, hashMap.get(key));
         }
         mappedBuffer.force();
     }
 
+    /**
+     * Performs lookup of the provided key in the collection and
+     * returns corresponding value if found. Otherwise, null is
+     * returned.
+     *
+     * @param key requested key
+     * @return AvailabilityItem corresponding to the current key
+     */
     public AvailabilityItem get(long key) {
         int bucketIdx = getBucketIdxByKey(key);
         byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
@@ -323,6 +343,14 @@ public class HashMMap {
         );
     }
 
+    /**
+     * Performs lookup of the provided key in the collection. If found,
+     * removes the corresponding value from the collection and returns it.
+     * Otherwise, null is returned.
+     *
+     * @param key requested key
+     * @return AvailabilityItem corresponding to the current key
+     */
     public AvailabilityItem remove(long key) {
         int bucketIdx = getBucketIdxByKey(key);
         byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
@@ -350,6 +378,10 @@ public class HashMMap {
         return item;
     }
 
+    /**
+     * Removes all elements from the collection by reinitialization of
+     * storage headers.
+     */
     public void clear() {
         bucketNumber = DEFAULT_INITIAL_BUCKET_NUMBER;
         initEmptyMappedBuffer();
