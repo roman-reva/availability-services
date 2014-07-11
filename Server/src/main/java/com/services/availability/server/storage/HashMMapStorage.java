@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class HashMMapStorage implements Storage {
     public final static int RECORD_NUM_THRESHOLD = 5000;
 
-    private HashMMap hashMMap = new HashMMap(false);
+    private HashMMap hashMMap = new HashMMap();
     private ConcurrentHashMap<Long, AvailabilityItem> hashMap = new ConcurrentHashMap<Long, AvailabilityItem>();
 
     @Override
