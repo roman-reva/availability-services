@@ -9,7 +9,9 @@ import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -20,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class HashMMap {
     public static final String STORAGE_FILE = "data.dat";       // storage filename
 
-    public static final int STORAGE_SIZE = 1024*1024*1024;      // 1 GB
+    public static final int STORAGE_SIZE = Integer.MAX_VALUE;   // 2 GB - 1b
     public static final int STORAGE_HEADER_SIZE = 8;            // bucketNumber:int + bucketCapacity:int
     public static final int STORAGE_BUCKET_NUM_OFFSET = 0;      // bucketNumber:int + bucketCapacity:int
     public static final int STORAGE_BUCKET_CAP_OFFSET = 4;      // bucketNumber:int + bucketCapacity:int
@@ -31,46 +33,12 @@ public class HashMMap {
 
     private static Logger log = Logger.getLogger(HashMMap.class);
 
-    private final MappedByteBuffer mappedBuffer;                // main storage buffer, mmaped to the file system
-    private ByteBuffer tmpBuffer;                               // temporary buffer, allocated during the resize operation
+    protected final MappedByteBuffer mappedBuffer;              // main storage buffer, mmaped to the file system
+    protected ByteBuffer tmpBuffer;                             // temporary buffer, allocated during the resize operation
 
-    private final int bucketCapacity;                           // number of records in a bucket
-    private final int bucketSize;                               // number of bytes allocated for bucket
-    private int bucketNumber;                                   // current number of buckets in the storage
-
-    private boolean flushAfterPut = true;                       // flush of the mmaped buffer required after each put
-
-    /**
-     * Initializes the storage. First an attempt to restore data from file
-     * is made.
-     *
-     * If file exists its structure is verified. If errors in headers are found, an
-     * exception is thrown. Otherwise, file is considered as valid and is used as storage.
-     *
-     * If file doesn't exist, it is been created, the data structure is initialized and
-     * storage parameters to the default values.
-     */
-    public HashMMap(boolean flushAfterPut) {
-        this.flushAfterPut = flushAfterPut;
-        boolean storageExists = storageFileExists();
-        this.mappedBuffer = bindMappedBuffer();
-
-        if (storageExists) {
-            this.bucketNumber = readStorageBktNum(mappedBuffer);
-            this.bucketCapacity = readStorageBktCapacity(mappedBuffer);
-            this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
-
-            verifyNonEmptyMappedBuffer();
-        } else {
-            this.bucketNumber = DEFAULT_INITIAL_BUCKET_NUMBER;
-            this.bucketCapacity = DEFAULT_BUCKET_CAPACITY;
-            this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
-
-            verifyAllocatedSpace(bucketNumber);     // verifying that storage file has enough space for data structure
-            initEmptyMappedBuffer();
-        }
-    }
-
+    protected final int bucketCapacity;                         // number of records in a bucket
+    protected final int bucketSize;                             // number of bytes allocated for bucket
+    protected volatile int bucketNumber;                        // current number of buckets in the storage
 
     /**
      * Initializes the storage. First an attempt to restore data from file
@@ -93,7 +61,7 @@ public class HashMMap {
 
             verifyNonEmptyMappedBuffer();
         } else {
-            this.bucketNumber = DEFAULT_INITIAL_BUCKET_NUMBER;
+            this.bucketNumber = getDefaultInitialBucketNumber();
             this.bucketCapacity = DEFAULT_BUCKET_CAPACITY;
             this.bucketSize = bucketCapacity * BinaryRecord.RECORD_SIZE + BinaryBucket.BUCKET_HEADER_SIZE;
 
@@ -134,6 +102,133 @@ public class HashMMap {
             initEmptyMappedBuffer();
         }
     }
+
+
+    /**
+     * Puts the element <i>value</i> into the collection by the specified <i>key</i>.
+     *
+     * @param key element key
+     * @param value value to put
+     */
+    public void put(long key, AvailabilityItem value) {
+        put(key, value, true);          // put element and flush buffer
+    }
+
+    /**
+     * Performs put of all elements from the provided map.
+     *
+     * @param hashMap source map
+     */
+    public void putAll(Map<Long,AvailabilityItem> hashMap) {
+        for (long key: hashMap.keySet()) {
+            this.put(key, hashMap.get(key), false);
+        }
+//        mappedBuffer.force();
+    }
+
+    /**
+     * Performs lookup of the provided key in the collection and
+     * returns corresponding value if found. Otherwise, null is
+     * returned.
+     *
+     * @param key requested key
+     * @return AvailabilityItem corresponding to the current key
+     */
+    public AvailabilityItem get(long key) {
+        int bucketIdx = getBucketIdxByKey(key);
+        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
+                binaryRecord = new byte[BinaryRecord.RECORD_SIZE];
+
+        int recordIdx = lookupInBucket(key, bucket, binaryRecord);
+
+        // not found
+        if (recordIdx < 0) return null;
+
+        return new AvailabilityItem(
+                BinaryRecord.getSku(binaryRecord),
+                BinaryRecord.getStore(binaryRecord),
+                BinaryRecord.getAmount(binaryRecord)
+        );
+    }
+
+    /**
+     * Performs lookup of the provided key in the collection. If found,
+     * removes the corresponding value from the collection and returns it.
+     * Otherwise, null is returned.
+     *
+     * @param key requested key
+     * @return AvailabilityItem corresponding to the current key
+     */
+    public AvailabilityItem remove(long key) {
+        int bucketIdx = getBucketIdxByKey(key);
+        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
+                record = new byte[BinaryRecord.RECORD_SIZE];
+
+        int recordIdx = lookupInBucket(key, bucket, record);
+        if (recordIdx < 0) return null;
+
+        AvailabilityItem item = new AvailabilityItem(
+                BinaryRecord.getSku(record),
+                BinaryRecord.getStore(record),
+                BinaryRecord.getAmount(record)
+        );
+
+        int bucketSize = BinaryBucket.getSize(bucket);
+        if (recordIdx == bucketSize - 1) {                                          // if it's a last record in bucket
+            // replacing it with zeros
+            writeRecordByIdx(bucketIdx, recordIdx, new byte[BinaryRecord.RECORD_SIZE], mappedBuffer);
+        } else {                                                                    // otherwise
+            moveRecordByIdx(bucketIdx, bucketSize - 1, recordIdx, mappedBuffer);    // moving the last record instead of this one
+        }
+        writeBucketSize(bucketIdx, bucketSize - 1, mappedBuffer);                   // and updating the bucket size
+//        mappedBuffer.force();
+
+        return item;
+    }
+
+    /**
+     * Returns set of all containing keys in the HashMMap. If no
+     * records are present, empty set is returned.
+     *
+     * Method iterates over the mmaped buffer and reads information
+     * about each bucket, therefore is <i>extremely expensive</i>
+     *
+     * @return set of keys
+     */
+    public Set<Long> keySet() {
+        Set<Long> keys = new HashSet<Long>();
+
+        int bktSize, bktIdx, rcdIdx;
+        byte[] bucket, record = new byte[BinaryRecord.RECORD_SIZE];
+        for (bktIdx = 0; bktIdx < bucketNumber; bktIdx++) {
+            bucket = readBucketByIdx(bktIdx, mappedBuffer);
+            bktSize = BinaryBucket.getSize(bucket);
+            for (rcdIdx = 0; rcdIdx < bktSize; rcdIdx++) {
+                readRecordFromBucket(rcdIdx, bucket, record);
+                keys.add(BinaryRecord.getKey(record));
+            }
+        }
+
+        return keys;
+    }
+
+    /**
+     * Removes all elements from the collection by reinitialization of
+     * storage headers.
+     */
+    public void clear() {
+        bucketNumber = getDefaultInitialBucketNumber();
+        initEmptyMappedBuffer();
+
+        log.debug("HashMMap cleared (bktNum = " + bucketNumber + ")");
+    }
+
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    //                                                                                                          //
+    //                                            INTERNAL METHODS                                              //
+    //                                                                                                          //
+    //////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     /**
      * Verifies if storage file exists.
@@ -221,7 +316,7 @@ public class HashMMap {
         writeStorageHeader(mappedBuffer, bucketNumber, bucketCapacity);
         initBuckets(mappedBuffer, bucketNumber, STORAGE_HEADER_SIZE);           // initializing buckets
 
-        mappedBuffer.force();
+//        mappedBuffer.force();
     }
 
     /**
@@ -271,125 +366,6 @@ public class HashMMap {
     }
 
     /**
-     * Puts the element <i>value</i> into the collection by the specified <i>key</i>.
-     *
-     * @param key element key
-     * @param value value to put
-     */
-    public void put(long key, AvailabilityItem value) {
-        int bucketIdx = getBucketIdxByKey(key);
-        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
-                record = new byte[BinaryRecord.RECORD_SIZE];
-
-        int recordIdx = lookupInBucket(key, bucket, record);
-
-        BinaryRecord.setKey(key, record);
-        BinaryRecord.setSku(value.getSku(), record);
-        BinaryRecord.setStore(value.getStore(), record);
-        BinaryRecord.setAmount(value.getAmount(), record);
-
-        if (recordIdx >= 0) {                                               // if record with such key already exists
-            writeRecordByIdx(bucketIdx, recordIdx, record, mappedBuffer);   // then updating the record data
-            if (flushAfterPut) mappedBuffer.force();
-            return;
-        }
-
-        int bucketSize = BinaryBucket.getSize(bucket);                      // otherwise, if record was not found
-        if (bucketSize < bucketCapacity) {                                  // and bucket is not full
-            writeRecordByIdx(bucketIdx, bucketSize, record, mappedBuffer);  // writing the record to the end of the bucket
-            writeBucketSize(bucketIdx, bucketSize + 1, mappedBuffer);       // and updating the bucket size
-
-            if (flushAfterPut) mappedBuffer.force();
-        } else {
-            resize(bucketNumber * RESIZE_COEFFICIENT);      // increasing number of buckets in RESIZE_COEFFICIENT times
-            put(key, value);                                // and starting put() operation over
-        }
-    }
-
-    /**
-     * Performs put of all elements from the provided map.
-     *
-     * @param hashMap source map
-     */
-    public void putAll(Map<Long,AvailabilityItem> hashMap) {
-        for (long key: hashMap.keySet()) {
-            this.put(key, hashMap.get(key));
-        }
-        mappedBuffer.force();
-    }
-
-    /**
-     * Performs lookup of the provided key in the collection and
-     * returns corresponding value if found. Otherwise, null is
-     * returned.
-     *
-     * @param key requested key
-     * @return AvailabilityItem corresponding to the current key
-     */
-    public AvailabilityItem get(long key) {
-        int bucketIdx = getBucketIdxByKey(key);
-        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
-                binaryRecord = new byte[BinaryRecord.RECORD_SIZE];
-
-        int recordIdx = lookupInBucket(key, bucket, binaryRecord);
-
-        // not found
-        if (recordIdx < 0) return null;
-
-        return new AvailabilityItem(
-                BinaryRecord.getSku(binaryRecord),
-                BinaryRecord.getStore(binaryRecord),
-                BinaryRecord.getAmount(binaryRecord)
-        );
-    }
-
-    /**
-     * Performs lookup of the provided key in the collection. If found,
-     * removes the corresponding value from the collection and returns it.
-     * Otherwise, null is returned.
-     *
-     * @param key requested key
-     * @return AvailabilityItem corresponding to the current key
-     */
-    public AvailabilityItem remove(long key) {
-        int bucketIdx = getBucketIdxByKey(key);
-        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
-                record = new byte[BinaryRecord.RECORD_SIZE];
-
-        int recordIdx = lookupInBucket(key, bucket, record);
-        if (recordIdx < 0) return null;
-
-        AvailabilityItem item = new AvailabilityItem(
-                BinaryRecord.getSku(record),
-                BinaryRecord.getStore(record),
-                BinaryRecord.getAmount(record)
-        );
-
-        int bucketSize = BinaryBucket.getSize(bucket);
-        if (recordIdx == bucketSize - 1) {                                          // if it's a last record in bucket
-            // replacing it with zeros
-            writeRecordByIdx(bucketIdx, recordIdx, new byte[BinaryRecord.RECORD_SIZE], mappedBuffer);
-        } else {                                                                    // otherwise
-            moveRecordByIdx(bucketIdx, bucketSize - 1, recordIdx, mappedBuffer);    // moving the last record instead of this one
-        }
-        writeBucketSize(bucketIdx, bucketSize - 1, mappedBuffer);                   // and updating the bucket size
-        mappedBuffer.force();
-
-        return item;
-    }
-
-    /**
-     * Removes all elements from the collection by reinitialization of
-     * storage headers.
-     */
-    public void clear() {
-        bucketNumber = DEFAULT_INITIAL_BUCKET_NUMBER;
-        initEmptyMappedBuffer();
-
-        log.debug("HashMMap cleared (bktNum = " + bucketNumber + ")");
-    }
-
-    /**
      * Performs lookup for a record in the provided bucket. If record exists,
      * performs copy of the record bytes into the targetBinaryRecord param
      * and returns record index in the bucket. Otherwise, returns -1.
@@ -411,6 +387,36 @@ public class HashMMap {
         }
 
         return -1;
+    }
+
+    protected void put(long key, AvailabilityItem value, boolean flush) {
+        int bucketIdx = getBucketIdxByKey(key);
+        byte[] bucket = readBucketByIdx(bucketIdx, mappedBuffer),
+                record = new byte[BinaryRecord.RECORD_SIZE];
+
+        int recordIdx = lookupInBucket(key, bucket, record);
+
+        BinaryRecord.setKey(key, record);
+        BinaryRecord.setSku(value.getSku(), record);
+        BinaryRecord.setStore(value.getStore(), record);
+        BinaryRecord.setAmount(value.getAmount(), record);
+
+        if (recordIdx >= 0) {                                               // if record with such key already exists
+            writeRecordByIdx(bucketIdx, recordIdx, record, mappedBuffer);   // then updating the record data
+//            if (flush) mappedBuffer.force();
+            return;
+        }
+
+        int bucketSize = BinaryBucket.getSize(bucket);                      // otherwise, if record was not found
+        if (bucketSize < bucketCapacity) {                                  // and bucket is not full
+            writeRecordByIdx(bucketIdx, bucketSize, record, mappedBuffer);  // writing the record to the end of the bucket
+            writeBucketSize(bucketIdx, bucketSize + 1, mappedBuffer);       // and updating the bucket size
+
+//            if (flush) mappedBuffer.force();
+        } else {
+            resize(bucketNumber * RESIZE_COEFFICIENT);      // increasing number of buckets in RESIZE_COEFFICIENT times
+            put(key, value, flush);                         // and starting put() operation over
+        }
     }
 
     /**
@@ -447,12 +453,12 @@ public class HashMMap {
      *
      * @param newBucketNumber new number of buckets
      */
-    private void resize(int newBucketNumber) {
+    protected void resize(int newBucketNumber) {
         if (newBucketNumber <= bucketNumber) return;
 
         log.debug("Resize started");
 
-        mappedBuffer.force();
+//        mappedBuffer.force();
         verifyAllocatedSpace(newBucketNumber);
         prepareBuffers(newBucketNumber);
 
@@ -481,7 +487,7 @@ public class HashMMap {
         writeStorageHeader(mappedBuffer, newBucketNumber, bucketCapacity);
         bucketNumber = newBucketNumber;
 
-        mappedBuffer.force();
+//        mappedBuffer.force();
 
         log.debug("Resize finished (new bucket number is " + bucketNumber + ")");
     }
@@ -674,6 +680,15 @@ public class HashMMap {
      */
     private int readStorageBktCapacity(ByteBuffer buffer) {
         return buffer.getInt(STORAGE_BUCKET_CAP_OFFSET);
+    }
+
+    /**
+     * Getter to be redefined.
+     *
+     * @return default initial number of buckets
+     */
+    protected int getDefaultInitialBucketNumber() {
+        return DEFAULT_INITIAL_BUCKET_NUMBER;
     }
 
     /**
