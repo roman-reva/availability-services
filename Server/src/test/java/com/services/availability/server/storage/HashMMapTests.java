@@ -194,19 +194,6 @@ public class HashMMapTests {
         }
     }
 
-    @Test
-    public void syncTest() {
-        Long value = 23897523985L, val2 = null;
-        long start, total;
-
-        start = System.nanoTime();
-        synchronized (value) {
-            val2 = 2L;
-        }
-        total = System.nanoTime() - start;
-        System.out.println("Total: " + total);
-    }
-
     private short getStore() {
         return (short)random.nextInt(1000);
     }
