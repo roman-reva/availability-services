@@ -70,7 +70,6 @@ public class NIOBinarySingleThreadServer extends AbstractServer {
                 keyIterator.remove();
             }
         }
-
     }
 
     @Override
