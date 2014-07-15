@@ -5,6 +5,7 @@ import org.apache.log4j.Logger;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Random;
 
 /**
  * @author Roman Reva
@@ -20,6 +21,7 @@ public class ClientApp {
     private ClientHeartbeatThread heartbeatThread;
     private AbstractClient client;
 
+    private Random random = new Random();
     private RandomRequestGenerator requestGenerator = new RandomRequestGenerator();
     private Logger log = Logger.getLogger(ClientApp.class);
 
@@ -46,7 +48,8 @@ public class ClientApp {
                 } else {
                     client.performRequest(requestGenerator.getRequest());
                 }
-//                Thread.sleep(1);
+
+//                if (random.nextInt(30) == 0) Thread.sleep(1);
 
             } catch (IOException e) {
                 log.error("Cannot perform request", e);

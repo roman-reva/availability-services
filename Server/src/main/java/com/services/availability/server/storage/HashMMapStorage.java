@@ -11,22 +11,23 @@ public class HashMMapStorage implements Storage {
     public final static int RECORD_NUM_THRESHOLD = 5000;
 
     private HashMMap hashMMap = new HashMMap();
-    private ConcurrentHashMap<Long, AvailabilityItem> hashMap = new ConcurrentHashMap<Long, AvailabilityItem>();
+    private ConcurrentHashMap<Long, AvailabilityItem> cache = new ConcurrentHashMap<Long, AvailabilityItem>();
 
     @Override
     public void put(long key, AvailabilityItem value) {
-        hashMap.put(key, value);
-        if (hashMap.size() > RECORD_NUM_THRESHOLD) {
-            hashMMap.putAll(hashMap);
-            hashMap.clear();
+        cache.put(key, value);
+        if (cache.size() > RECORD_NUM_THRESHOLD) {
+            hashMMap.putAll(cache);
+            hashMMap.flushMappedBuffer();
+            cache.clear();
         }
     }
 
     @Override
     public AvailabilityItem get(long key) {
         Long objKey = key;
-        if (hashMap.containsKey(objKey)) {
-            return hashMap.get(objKey);
+        if (cache.containsKey(objKey)) {
+            return cache.get(objKey);
         } else {
             return hashMMap.get(objKey);
         }
@@ -34,7 +35,7 @@ public class HashMMapStorage implements Storage {
 
     @Override
     public AvailabilityItem remove(long key) {
-        AvailabilityItem mapValue = hashMap.remove(key);
+        AvailabilityItem mapValue = cache.remove(key);
         AvailabilityItem mmapValue = hashMMap.remove(key);
         return mapValue != null ? mapValue : mmapValue;
     }

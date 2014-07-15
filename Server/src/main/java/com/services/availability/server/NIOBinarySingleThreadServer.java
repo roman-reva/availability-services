@@ -83,6 +83,11 @@ public class NIOBinarySingleThreadServer extends AbstractServer {
         return Logger.getLogger(NIOBinarySingleThreadServer.class);
     }
 
+    public void shutdown() throws IOException {
+        super.shutdown();
+        requestProcessor.shutdownStorage();
+    }
+
     public static void main(String[] args) throws IOException {
         new NIOBinarySingleThreadServer().startup();
     }

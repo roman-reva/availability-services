@@ -123,7 +123,10 @@ public class HashMMap {
         for (long key: hashMap.keySet()) {
             this.put(key, hashMap.get(key), false);
         }
-//        mappedBuffer.force();
+    }
+
+    protected void flushMappedBuffer() {
+        mappedBuffer.force();
     }
 
     /**
@@ -220,7 +223,7 @@ public class HashMMap {
         bucketNumber = getDefaultInitialBucketNumber();
         initEmptyMappedBuffer();
 
-        log.debug("HashMMap cleared (bktNum = " + bucketNumber + ")");
+        getLogger().debug("HashMMap cleared (bktNum = " + bucketNumber + ")");
     }
 
 
@@ -249,9 +252,9 @@ public class HashMMap {
             FileChannel fileChannel = file.getChannel();
             buffer = fileChannel.map(FileChannel.MapMode.READ_WRITE, 0, STORAGE_SIZE);
         } catch (FileNotFoundException e) {
-            log.error(e);
+            getLogger().error(e);
         } catch (IOException e) {
-            log.error(e);
+            getLogger().error(e);
         }
 
         return buffer;
@@ -277,17 +280,17 @@ public class HashMMap {
         IllegalStateException corruptedException = new IllegalStateException("file `" + STORAGE_FILE + "` is corrupted");
 
         if (bucketNumber <= 0) {
-            log.debug("storage file is corrupted");
+            getLogger().debug("storage file is corrupted");
             throw corruptedException;
         }
         if (bucketCapacity <= 0) {
-            log.debug("storage file is corrupted");
+            getLogger().debug("storage file is corrupted");
             throw corruptedException;
         }
 
         int structureSize = STORAGE_HEADER_SIZE + bucketNumber * bucketSize;
         if (structureSize > STORAGE_SIZE) {
-            log.debug("storage file is corrupted");
+            getLogger().debug("storage file is corrupted");
             throw corruptedException;
         }
 
@@ -298,13 +301,13 @@ public class HashMMap {
             bktSize = BinaryBucket.getSize(bkt);
 
             if (bktSize < 0 || bktSize > bucketCapacity) {
-                log.debug("storage file is corrupted");
+                getLogger().debug("storage file is corrupted");
                 throw corruptedException;
             }
             totalRcdNum += bktSize;
         }
 
-        log.debug("storage file is verified and looks fine (bktNum = " + bucketNumber + ", bktCap = " + bucketCapacity + ", rcdNum = " + totalRcdNum + ")");
+        getLogger().debug("storage file is verified and looks fine (bktNum = " + bucketNumber + ", bktCap = " + bucketCapacity + ", rcdNum = " + totalRcdNum + ")");
     }
 
 
@@ -456,7 +459,7 @@ public class HashMMap {
     protected void resize(int newBucketNumber) {
         if (newBucketNumber <= bucketNumber) return;
 
-        log.debug("Resize started");
+        getLogger().debug("Resize started");
 
 //        mappedBuffer.force();
         verifyAllocatedSpace(newBucketNumber);
@@ -489,7 +492,7 @@ public class HashMMap {
 
 //        mappedBuffer.force();
 
-        log.debug("Resize finished (new bucket number is " + bucketNumber + ")");
+        getLogger().debug("Resize finished (new bucket number is " + bucketNumber + ")");
     }
 
     /**
@@ -524,7 +527,7 @@ public class HashMMap {
                 byte b = tmpBuffer.get(byteIdx);
                 mappedBuffer.put(byteIdx++, b);
             } catch (IndexOutOfBoundsException e) {
-                log.error("byteIdx = " + byteIdx + ", byteNum = " + byteNum, e);
+                getLogger().error("byteIdx = " + byteIdx + ", byteNum = " + byteNum, e);
                 throw new RuntimeException(e);
             }
         }
@@ -581,7 +584,7 @@ public class HashMMap {
             try {
                 byteBucket[byteIdx++] = buffer.get(bufAddress);
             } catch (IndexOutOfBoundsException e) {
-                log.error("Error reading buffer at position " + bufAddress + " (bktAddress = " + bktAddress + ")", e);
+                getLogger().error("Error reading buffer at position " + bufAddress + " (bktAddress = " + bktAddress + ")", e);
                 System.exit(0);
             }
         }
@@ -689,6 +692,15 @@ public class HashMMap {
      */
     protected int getDefaultInitialBucketNumber() {
         return DEFAULT_INITIAL_BUCKET_NUMBER;
+    }
+
+    /**
+     * Getter for logger.
+     *
+     * @return logger
+     */
+    protected Logger getLogger() {
+        return log;
     }
 
     /**

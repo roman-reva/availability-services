@@ -6,7 +6,7 @@ import com.services.availability.protocol.binary.BinaryRequest;
 import com.services.availability.protocol.binary.BinaryRequestType;
 import com.services.availability.protocol.binary.BinaryResponse;
 import com.services.availability.server.storage.AvailabilityItem;
-import com.services.availability.server.storage.HashMMapStorage;
+import com.services.availability.server.storage.ConcurrentHashMMap;
 import com.services.availability.common.SerializationUtils;
 import com.services.availability.common.ThroughputMeter;
 
@@ -23,7 +23,8 @@ public class RequestProcessor {
     protected volatile long removesNumber = 0L;
 
 //    private HashMapStorage storage = new HashMapStorage();
-    private HashMMapStorage storage = new HashMMapStorage();
+//    private HashMMapStorage storage = new HashMMapStorage();
+    private ConcurrentHashMMap storage = new ConcurrentHashMMap();
     private ThroughputMeter throughputMeter;
 
     public RequestProcessor(ThroughputMeter throughputMeter) {
@@ -76,6 +77,10 @@ public class RequestProcessor {
         }
 
         return byteResponse;
+    }
+
+    public void shutdownStorage() {
+        storage.prepareForShutdown();
     }
 
     private PutAvailabilityResponse processPut(PutAvailabilityRequest request) {

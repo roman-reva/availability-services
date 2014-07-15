@@ -1,17 +1,29 @@
 package com.services.availability.server.storage;
 
-import java.util.concurrent.ConcurrentHashMap;
+import org.apache.log4j.Logger;
+
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * @author Roman Reva
  * @version 1.0
  * @since 2014-07-09 13:32
  */
-public class ConcurrentHashMMap extends HashMMap {
+public class ConcurrentHashMMap extends HashMMap implements Storage {
     public static final int SYNC_INITIAL_BUCKET_NUMBER = 1024 * 1024 * 3;   // should be enough for ~ 5 * 10^7 elements
 
-    private final PRCache prCache = new PRCache();
+    private static Logger log = Logger.getLogger(ConcurrentHashMMap.class);
+
+    private final Cache cache = new Cache();
+    protected final Lock flushLock = new ReentrantLock();
     private Object[] bucketMonitor = null;
+
+    private final ExecutorService batchJobExecutor = Executors.newSingleThreadExecutor();
 
     /**
      * Initializes the storage. First an attempt to restore data from file
@@ -54,11 +66,9 @@ public class ConcurrentHashMMap extends HashMMap {
      * @return AvailabilityItem corresponding to the current key
      */
     public AvailabilityItem get(long key) {
-        synchronized (monitorForKey(key)) {
-            AvailabilityItem cachedValue = prCache.get(key);
-            if (cachedValue != null) return cachedValue;
-
-            return super.get(key);
+        synchronized (monitorForKey(key)) {         // cache.put() requires synchronization here
+            Cache.OperationResult operationResult = cache.get(key);
+            return operationResult.isFoundByKey() ? operationResult.getValue() : super.get(key);
         }
     }
 
@@ -73,8 +83,9 @@ public class ConcurrentHashMMap extends HashMMap {
      * @param value availability item to put
      */
     public void put(long key, AvailabilityItem value) {
-        synchronized (monitorForKey(key)) {
-            prCache.put(key, value);
+        synchronized (monitorForKey(key)) {         // cache.put() requires synchronization here
+            cache.put(key, value);
+            verifyAndStartBatch();
         }
     }
 
@@ -90,8 +101,56 @@ public class ConcurrentHashMMap extends HashMMap {
      */
     public AvailabilityItem remove(long key) {
         synchronized (monitorForKey(key)) {
-            return prCache.remove(key);
+            Cache.OperationResult result = cache.remove(key);
+            AvailabilityItem removedValue = result.isFoundByKey() ? result.getValue() : super.get(key);
+            verifyAndStartBatch();
+            return removedValue;
         }
+    }
+
+    /**
+     * Method prepares storage for safe shutdown.
+     *
+     * Method waits for BatchJob thread to finish its activity and verifies that
+     * there are no records in cache that are non persisted.
+     */
+    public void prepareForShutdown() {
+        log.debug("Scheduling flush for the rest of records that are in cache");
+        startBatchNow();
+
+        log.debug("Sending shutdown signal to batchJobExecutor");
+        batchJobExecutor.shutdown();
+
+        if (!batchJobExecutor.isTerminated()) {
+            try {
+                boolean terminated = batchJobExecutor.awaitTermination(60, TimeUnit.SECONDS); // waiting for termination
+                if (!terminated) throw new RuntimeException("Termination timeout elapsed.");  // termination goes too long
+
+                cache.ensureEmpty();                // just to be sure
+            } catch (InterruptedException e) {
+                log.error(e);
+            }
+        }
+        log.debug("Storage is ready for shutdown.");
+    }
+
+    /**
+     * Put operation on the mmaped buffer.
+     *
+     * @param key long number to use as key
+     * @param value availability item to put
+     */
+    protected void persistentPut(long key, AvailabilityItem value) {
+        super.put(key, value);
+    }
+
+    /**
+     * Remove operation on the mmaped buffer.
+     *
+     * @param key long number to use as key
+     */
+    protected AvailabilityItem persistentRemove(long key) {
+        return super.remove(key);
     }
 
     /**
@@ -108,6 +167,40 @@ public class ConcurrentHashMMap extends HashMMap {
             bucketMonitors[bktNum++] = new Object();
         }
         this.bucketMonitor = bucketMonitors;
+    }
+
+    /**
+     * Verifies if number of cached changes has exceeded some threshold. If
+     * cache is full and no batch job is running, then a new batch job is scheduled.
+     * Otherwise, if cache is full but the job is already in progress, then
+     * cache capacity is extended.
+     */
+    private void verifyAndStartBatch() {
+        boolean lockAcquired = false;
+        try {
+            lockAcquired = flushLock.tryLock();
+            if (lockAcquired) {             // no batch job is running, we can start new job if necessary
+                Map<Long, Cache.CacheValue> cachedValues = cache.verifyAndSwap();
+                if (cachedValues != null) {                 // cache was swapped
+                    batchJobExecutor.submit(new BatchJobThread(this, cachedValues));
+                }
+            } else {
+                cache.verifyAndExtend();    // batch job is already running, resize required
+            }
+        } finally {
+            if (lockAcquired) flushLock.unlock();
+        }
+    }
+
+    /**
+     * Schedules a new batch job that start persisting all records that are
+     * currently contained in cache.
+     */
+    private void startBatchNow() {
+        Map<Long, Cache.CacheValue> cachedValues = cache.swap();
+        if (cachedValues != null && cachedValues.size() > 0) {
+            batchJobExecutor.submit(new BatchJobThread(this, cachedValues));
+        }
     }
 
     /**
@@ -147,79 +240,58 @@ public class ConcurrentHashMMap extends HashMMap {
     }
 
     /**
+     * Getter for logger.
      *
+     * @return logger
      */
-    public static class PRCache {           // todo: extract cache as a separate class
-        private final ConcurrentHashMap<Long, AvailabilityItem> cacheA = new ConcurrentHashMap<Long, AvailabilityItem>();
-        private final ConcurrentHashMap<Long, AvailabilityItem> cacheB = new ConcurrentHashMap<Long, AvailabilityItem>();
-
-        private boolean frontCacheA = true;
-
-        /**
-         * Puts object to the cache by the specified key.
-         *
-         * @param key object key
-         * @param value availability item to put
-         */
-        public void put(long key, AvailabilityItem value) {
-            getFrontEndCache().put(key, value);
-        }
-
-        /**
-         * Performs search by the specified key in the cache.
-         *
-         * @param key requested key
-         * @return corresponding AvailabilityItem if found, otherwise null
-         */
-        public synchronized AvailabilityItem get(long key) {
-            getBackEndCache().get(key);             // todo improve GET
-            getFrontEndCache().get(key);
-
-            return null;
-        }
-
-        /**
-         * Add object to the cache for remove operation. Returns false,
-         * if object was already there, true otherwise.
-         *
-         * @param key requested key
-         * @return true, if object was added to the r-cache. False, if it already was there
-         */
-        public AvailabilityItem remove(long key) {
-            return getFrontEndCache().put(key, null);
-        }
-
-        /**
-         * Returns back-end cache that is currently not in use.
-         * @return
-         */
-        public synchronized ConcurrentHashMap<Long, AvailabilityItem> getBackEndCache() {
-            return frontCacheA ? cacheB : cacheA;
-        }
-
-        /**
-         *
-         */
-        public synchronized void switchCaches() {
-            frontCacheA = !frontCacheA;
-        }
-
-        private ConcurrentHashMap<Long, AvailabilityItem> getFrontEndCache() {
-            return frontCacheA ? cacheA : cacheB;
-        }
-
-
+    protected Logger getLogger() {
+        return log;
     }
 
     /**
-     * Class performs synchronization of p-cache and r-cache with the persistent
-     * storage.
+     * Class performs synchronization of cache with the persistent storage.
      */
-    public static class BatchJobThread extends Thread {
+    public static class BatchJobThread implements Runnable {
+        private Logger logger = Logger.getLogger(BatchJobThread.class);
+        private Map<Long, Cache.CacheValue> cachedValues;
+        private ConcurrentHashMMap hashMMap;
+
+        public BatchJobThread(ConcurrentHashMMap map, Map<Long, Cache.CacheValue> cacheValues) {
+            cachedValues = cacheValues;
+            hashMMap = map;
+        }
+
         @Override
         public void run() {
-            while (true) {
-                // todo:
+            logger.debug("BatchJobThread started. Processing " + cachedValues.size() + " cached values");
+            Lock lock = hashMMap.flushLock;
+            boolean lockAcquired = false;
+            try {
+                lockAcquired = lock.tryLock(30, TimeUnit.SECONDS);
+                logger.debug("lockAcquired = " + lockAcquired);
+
+                if (lockAcquired) {
+                    for (Long key: cachedValues.keySet()) {
+                        AvailabilityItem value = cachedValues.get(key).value;
+                        if (value == null) {
+                            hashMMap.persistentRemove(key);
+                        } else {
+                            hashMMap.persistentPut(key, value);
+                        }
+                    }
+
+                    logger.debug("flushing buffer");
+                    hashMMap.flushMappedBuffer();
+                    logger.debug("flush completed");
+                } else throw new RuntimeException("BatchJobThread was not able to acquire the FLUSH LOCK. Looks like a deadlock.");
+            } catch (InterruptedException e) {
+                log.error(e);
+            } finally {
+                if (lockAcquired) {
+                    lock.unlock();
+                    logger.debug("lock released");
+                }
+                logger.debug("BatchJobThread terminated.");
             }
         }
     }
