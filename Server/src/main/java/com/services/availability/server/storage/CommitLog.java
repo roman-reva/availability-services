@@ -12,28 +12,28 @@ import java.io.*;
 public class CommitLog {
     private Logger log = Logger.getLogger(CommitLog.class);
 
+    private final static int MAX_RECORDS_IN_LOG = 50000;
+
+    private final static String META_FILE = "meta.dat";
     private final static String FILE_PREFIX = "dblog_";
     private final static String FILE_EXTENTION = ".dat";
 
-    private File logFile = new File(FILE_PREFIX + "0" + FILE_EXTENTION);
+    private final static int LOG_FILES_NUMBER = 20;
 
-    private FileOutputStream fos = null;
+    private int recordCounter = 0;
+    private int currentLog = 0;
 
-//    private int logFilesNumber = 5;
-//    private int currentLog = 0;
+    private File logFile;
+    private FileInputStream logFis = null;
+    private FileOutputStream logFos = null;
+
+    private File metaFile;
+    private FileInputStream metaFis = null;
+    private FileOutputStream metaFos = null;
 
     public CommitLog() {
-//        for (int idx = 0; idx < logFilesNumber; idx++) {
-//            File file = new File(FILE_PREFIX + idx + FILE_EXTENTION);
-//            if (file.exists()) currentLog = idx;
-//        }
-
-        try {
-            fos = new FileOutputStream(logFile);
-        } catch (FileNotFoundException e) {
-            log.error(e);
-            throw new RuntimeException("Not able to open log file", e);
-        }
+        initMetaFile();
+        openLogFile();
     }
 
     public void addPutRecord(AvailabilityItem item) throws IOException {
@@ -48,15 +48,121 @@ public class CommitLog {
 
     public void closeLogFiles() {
         try {
-            fos.close();
+            boolean logFisClosed=false, logFosClosed=false, metaFisClosed=false, metaFosClosed=false;
+            if (logFis != null) {
+                logFis.close();
+                logFisClosed = true;
+            }
+            if (logFos != null) {
+                logFos.close();
+                logFosClosed = true;
+            }
+            if (metaFis != null) {
+                metaFis.close();
+                metaFisClosed = true;
+            }
+            if (metaFos != null) {
+                metaFos.close();
+                metaFosClosed = true;
+            }
+
+            log.debug("logFisClosed="+logFisClosed+", logFosClosed="+logFosClosed+", metaFisClosed="+metaFisClosed+", metaFosClosed="+metaFosClosed);
         } catch (IOException e) {
             log.error(e);
         }
     }
 
+    private void initMetaFile() {
+        metaFile = new File(META_FILE);
+        try {
+            boolean fileCreated = metaFile.createNewFile();
+            metaFos = new FileOutputStream(metaFile);
+            metaFis = new FileInputStream(metaFile);
+
+            byte[] bytes = new byte[4];
+            if (fileCreated) {
+                HashMMap.ByteUtils.putInt(recordCounter, bytes, 0);
+                metaFos.write(bytes, 0, 4);
+                metaFos.flush();
+            } else {
+                if (metaFile.length() != 4) throw new IllegalStateException("Meta file data is corrupted, fileSize = " + metaFile.length());
+                int readBytes = metaFis.read(bytes, 0, 4);
+                if (readBytes != 4) throw new IllegalStateException("Meta file data is corrupted, readBytes = " + readBytes);
+
+                currentLog = HashMMap.ByteUtils.getInt(bytes, 0);
+                if (currentLog < 0) throw new IllegalStateException("Meta file data is corrupted");
+            }
+        } catch (FileNotFoundException e) {
+            log.error(e);
+            throw new RuntimeException("Not able to open log file", e);
+        } catch (IOException e) {
+            log.error(e);
+        }
+    }
+
+    private void openLogFile() {
+        logFile = new File(FILE_PREFIX + currentLog + FILE_EXTENTION);
+        boolean fileExists = logFile.exists();
+        try {
+            if (!fileExists) {
+                boolean created = logFile.createNewFile();
+                if (!created) throw new IllegalStateException("Cannot create log file; filename=" + logFile.getName());
+                log.debug("New log file created; filename = " + logFile.getName());
+            }
+
+            logFos = new FileOutputStream(logFile);
+            logFis = new FileInputStream(logFile);
+
+            if (fileExists) {
+                verifyIntegrity();
+            } else {
+                initLogHeader();
+            }
+        } catch (FileNotFoundException e) {
+            log.error(e);
+            throw new RuntimeException("Not able to open log file", e);
+        } catch (IOException e) {
+            log.error(e);
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void verifyIntegrity() throws IOException {
+        long fileSize = logFile.length();
+        if (fileSize % 32 != 0) throw new IllegalStateException("File length is suspicious");
+        if (fileSize > (long)Integer.MAX_VALUE) throw new IllegalStateException("Log file is extremely large");
+
+        int recordsToVerify = 100;
+        int contentSize = (int) fileSize - 32;
+        int bufferSize = (contentSize < 32 * recordsToVerify) ? contentSize : 32 * recordsToVerify;
+
+        int offset = (contentSize < 32 * recordsToVerify) ? 32 : 32 + contentSize - bufferSize;
+        byte[] buffer = new byte[bufferSize];
+
+        int bytesRead = logFis.read(buffer, offset, bufferSize);
+        if (bytesRead != bufferSize) throw new IllegalStateException("Could not read last records, byteNum = " + bufferSize);
+
+        byte[] record = new byte[32];
+        for (int i=0; i<recordsToVerify; i++) {
+            System.arraycopy(buffer, i * 32, record, 0, 32);
+            LogRecord.fromByteArray(record);                    // verifying control sum
+        }
+    }
+
+    private void initLogHeader() throws IOException {
+        writeHeader(0);
+    }
+
     private void writeRecord(LogRecord record) throws IOException {
-        fos.write(LogRecord.toByteArray(record));
-        fos.flush();
+        logFos.write(LogRecord.toByteArray(record));
+        logFos.flush();
+    }
+
+    private void writeHeader(int recordsCommitted) throws IOException {
+        byte[] header = new byte[32];
+        HashMMap.ByteUtils.putInt(recordsCommitted, header, 0);
+        logFos.write(header);
+        logFos.flush();
     }
 
     private static class LogRecord {

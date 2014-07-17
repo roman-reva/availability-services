@@ -1,20 +1,18 @@
-package com.services.availability.server.storage;
+package com.services.availability.server;
 
-
-import org.junit.Test;
+import com.services.availability.server.storage.AvailabilityItem;
+import com.services.availability.server.storage.CommitLog;
 
 import java.io.IOException;
 
 /**
  * @author Roman Reva
  * @version 1.0
- * @since 2014-07-15 19:51
+ * @since 2014-07-16 14:47
  */
-public class CommitLogTests {
-
-    @Test
-    public void writeToLogTest() throws IOException {
-        AvailabilityItem item = new AvailabilityItem(TestUtils.getSku(), TestUtils.getStore(), TestUtils.getAmount());
+public class CommitLogApp {
+    public static void main(String[] args) throws IOException {
+        AvailabilityItem item = new AvailabilityItem(34643636, (short)463, 436435643);
         CommitLog commitLog = new CommitLog();
 
         // single record
