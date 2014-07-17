@@ -1,13 +1,14 @@
-package com.services.availability.server.storage;
+package com.services.availability.storage;
 
-import java.util.concurrent.ConcurrentHashMap;
+import com.services.availability.model.AvailabilityItem;
+import com.services.availability.storage.hashmmap.ConcurrentHashMMap;
 
 /**
  * @author Roman Reva
  * @version 1.0
  * @since 2014-07-09 14:57
  */
-public class ConcurrentHashMMapStorage implements Storage {
+public class CachedLoggedStorage implements Storage {
     private ConcurrentHashMMap hashMMap = new ConcurrentHashMMap();
 
     @Override
@@ -23,5 +24,10 @@ public class ConcurrentHashMMapStorage implements Storage {
     @Override
     public AvailabilityItem remove(long key) {
         return hashMMap.remove(key);
+    }
+
+    @Override
+    public void prepareForShutdown() {
+        hashMMap.prepareForShutdown();
     }
 }

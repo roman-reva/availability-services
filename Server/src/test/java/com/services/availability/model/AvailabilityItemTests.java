@@ -1,6 +1,7 @@
-package com.services.availability.server.storage;
+package com.services.availability.model;
 
 
+import com.services.availability.model.AvailabilityItem;
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;

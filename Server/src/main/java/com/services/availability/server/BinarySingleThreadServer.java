@@ -2,7 +2,6 @@ package com.services.availability.server;
 
 import com.services.availability.protocol.binary.BinaryRequest;
 import com.services.availability.protocol.binary.BinaryResponse;
-import com.services.availability.server.core.AbstractServer;
 import org.apache.log4j.Logger;
 
 import java.io.IOException;
@@ -19,8 +18,26 @@ import java.util.Set;
  * @version 1.0
  * @since 2014-06-24 14:18
  */
-public class NIOBinarySingleThreadServer extends AbstractServer {
+public class BinarySingleThreadServer extends AbstractServer {
     private final InetSocketAddress serverAddress = new InetSocketAddress(8888);
+
+    /**
+     * Default server constructor.
+     */
+    public BinarySingleThreadServer() {
+        super();
+    }
+
+    /**
+     * Current constructor allows to provide ServerShutdownHook entity that
+     * will contain some actions that should be executed during the server
+     * shutdown.
+     *
+     * @param hook implementation of a ServerShutdownHook interface
+     */
+    public BinarySingleThreadServer(ServerShutdownHook hook) {
+        super(hook);
+    }
 
     @Override
     protected void serverLoop() throws IOException {
@@ -79,15 +96,6 @@ public class NIOBinarySingleThreadServer extends AbstractServer {
 
     @Override
     protected Logger getLogger() {
-        return Logger.getLogger(NIOBinarySingleThreadServer.class);
-    }
-
-    public void shutdown() throws IOException {
-        super.shutdown();
-        requestProcessor.shutdownStorage();
-    }
-
-    public static void main(String[] args) throws IOException {
-        new NIOBinarySingleThreadServer().startup();
+        return Logger.getLogger(BinarySingleThreadServer.class);
     }
 }

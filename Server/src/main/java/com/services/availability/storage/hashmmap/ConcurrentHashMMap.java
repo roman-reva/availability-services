@@ -1,5 +1,10 @@
-package com.services.availability.server.storage;
+package com.services.availability.storage.hashmmap;
 
+import com.services.availability.model.AvailabilityItem;
+import com.services.availability.storage.Storage;
+import com.services.availability.storage.cache.CacheValue;
+import com.services.availability.storage.cache.OperationResult;
+import com.services.availability.storage.cache.StorageCache;
 import org.apache.log4j.Logger;
 
 import java.util.Map;
@@ -19,7 +24,7 @@ public class ConcurrentHashMMap extends HashMMap implements Storage {
 
     private static Logger log = Logger.getLogger(ConcurrentHashMMap.class);
 
-    private final Cache cache = new Cache();
+    private final StorageCache storageCache = new StorageCache();
     protected final Lock flushLock = new ReentrantLock();
     private Object[] bucketMonitor = null;
 
@@ -67,7 +72,7 @@ public class ConcurrentHashMMap extends HashMMap implements Storage {
      */
     public AvailabilityItem get(long key) {
         synchronized (monitorForKey(key)) {         // cache.put() requires synchronization here
-            Cache.OperationResult operationResult = cache.get(key);
+            OperationResult operationResult = storageCache.get(key);
             return operationResult.isFoundByKey() ? operationResult.getValue() : super.get(key);
         }
     }
@@ -84,7 +89,7 @@ public class ConcurrentHashMMap extends HashMMap implements Storage {
      */
     public void put(long key, AvailabilityItem value) {
         synchronized (monitorForKey(key)) {         // cache.put() requires synchronization here
-            cache.put(key, value);
+            storageCache.put(key, value);
             verifyAndStartBatch();
         }
     }
@@ -101,7 +106,7 @@ public class ConcurrentHashMMap extends HashMMap implements Storage {
      */
     public AvailabilityItem remove(long key) {
         synchronized (monitorForKey(key)) {
-            Cache.OperationResult result = cache.remove(key);
+            OperationResult result = storageCache.remove(key);
             AvailabilityItem removedValue = result.isFoundByKey() ? result.getValue() : super.get(key);
             verifyAndStartBatch();
             return removedValue;
@@ -126,7 +131,7 @@ public class ConcurrentHashMMap extends HashMMap implements Storage {
                 boolean terminated = batchJobExecutor.awaitTermination(60, TimeUnit.SECONDS); // waiting for termination
                 if (!terminated) throw new RuntimeException("Termination timeout elapsed.");  // termination goes too long
 
-                cache.ensureEmpty();                // just to be sure
+                storageCache.ensureEmpty();                // just to be sure
             } catch (InterruptedException e) {
                 log.error(e);
             }
@@ -180,12 +185,12 @@ public class ConcurrentHashMMap extends HashMMap implements Storage {
         try {
             lockAcquired = flushLock.tryLock();
             if (lockAcquired) {             // no batch job is running, we can start new job if necessary
-                Map<Long, Cache.CacheValue> cachedValues = cache.verifyAndSwap();
+                Map<Long, CacheValue> cachedValues = storageCache.verifyAndSwap();
                 if (cachedValues != null) {                 // cache was swapped
                     batchJobExecutor.submit(new BatchJobThread(this, cachedValues));
                 }
             } else {
-                cache.verifyAndExtend();    // batch job is already running, resize required
+                storageCache.verifyAndExtend();    // batch job is already running, resize required
             }
         } finally {
             if (lockAcquired) flushLock.unlock();
@@ -197,7 +202,7 @@ public class ConcurrentHashMMap extends HashMMap implements Storage {
      * currently contained in cache.
      */
     private void startBatchNow() {
-        Map<Long, Cache.CacheValue> cachedValues = cache.swap();
+        Map<Long, CacheValue> cachedValues = storageCache.swap();
         if (cachedValues != null && cachedValues.size() > 0) {
             batchJobExecutor.submit(new BatchJobThread(this, cachedValues));
         }
@@ -253,10 +258,10 @@ public class ConcurrentHashMMap extends HashMMap implements Storage {
      */
     public static class BatchJobThread implements Runnable {
         private Logger logger = Logger.getLogger(BatchJobThread.class);
-        private Map<Long, Cache.CacheValue> cachedValues;
+        private Map<Long, CacheValue> cachedValues;
         private ConcurrentHashMMap hashMMap;
 
-        public BatchJobThread(ConcurrentHashMMap map, Map<Long, Cache.CacheValue> cacheValues) {
+        public BatchJobThread(ConcurrentHashMMap map, Map<Long, CacheValue> cacheValues) {
             cachedValues = cacheValues;
             hashMMap = map;
         }

@@ -1,9 +1,7 @@
-package com.services.availability.server.core;
+package com.services.availability.server;
 
 import com.services.availability.common.ThroughputMeter;
 import org.apache.log4j.Logger;
-
-import java.util.Date;
 
 /**
  * @author Roman Reva

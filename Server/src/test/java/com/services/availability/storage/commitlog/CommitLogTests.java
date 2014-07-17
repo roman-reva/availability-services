@@ -1,6 +1,9 @@
-package com.services.availability.server.storage;
+package com.services.availability.storage.commitlog;
 
 
+import com.services.availability.TestUtils;
+import com.services.availability.model.AvailabilityItem;
+import com.services.availability.storage.commitlog.CommitLog;
 import org.junit.Test;
 
 import java.io.IOException;

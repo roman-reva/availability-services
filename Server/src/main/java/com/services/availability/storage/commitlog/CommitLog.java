@@ -1,5 +1,7 @@
-package com.services.availability.server.storage;
+package com.services.availability.storage.commitlog;
 
+import com.services.availability.model.AvailabilityItem;
+import com.services.availability.utils.ByteUtils;
 import org.apache.log4j.Logger;
 
 import java.io.*;
@@ -81,7 +83,7 @@ public class CommitLog {
 
             byte[] bytes = new byte[4];
             if (fileCreated) {
-                HashMMap.ByteUtils.putInt(recordCounter, bytes, 0);
+                ByteUtils.putInt(recordCounter, bytes, 0);
                 metaFos.write(bytes, 0, 4);
                 metaFos.flush();
             } else {
@@ -89,7 +91,7 @@ public class CommitLog {
                 int readBytes = metaFis.read(bytes, 0, 4);
                 if (readBytes != 4) throw new IllegalStateException("Meta file data is corrupted, readBytes = " + readBytes);
 
-                currentLog = HashMMap.ByteUtils.getInt(bytes, 0);
+                currentLog = ByteUtils.getInt(bytes, 0);
                 if (currentLog < 0) throw new IllegalStateException("Meta file data is corrupted");
             }
         } catch (FileNotFoundException e) {
@@ -160,7 +162,7 @@ public class CommitLog {
 
     private void writeHeader(int recordsCommitted) throws IOException {
         byte[] header = new byte[32];
-        HashMMap.ByteUtils.putInt(recordsCommitted, header, 0);
+        ByteUtils.putInt(recordsCommitted, header, 0);
         logFos.write(header);
         logFos.flush();
     }
@@ -211,11 +213,11 @@ public class CommitLog {
 
             byteRecord[0] = record.type;
             byteRecord[1] = record.committed;
-            HashMMap.ByteUtils.putLong(record.key, byteRecord, 1);
-            HashMMap.ByteUtils.putInt(record.sku, byteRecord, 9);
-            HashMMap.ByteUtils.putShort(record.store, byteRecord, 13);
-            HashMMap.ByteUtils.putInt(record.amount, byteRecord, 15);
-            HashMMap.ByteUtils.putInt(record.getControlSum(), byteRecord, 28);
+            ByteUtils.putLong(record.key, byteRecord, 1);
+            ByteUtils.putInt(record.sku, byteRecord, 9);
+            ByteUtils.putShort(record.store, byteRecord, 13);
+            ByteUtils.putInt(record.amount, byteRecord, 15);
+            ByteUtils.putInt(record.getControlSum(), byteRecord, 28);
 
             return byteRecord;
         }
@@ -223,14 +225,14 @@ public class CommitLog {
         public static LogRecord fromByteArray(byte[] byteRecord) {
             byte type = byteRecord[0];
             byte committed = byteRecord[1];
-            long key = HashMMap.ByteUtils.getLong(byteRecord, 2);
-            int sku = HashMMap.ByteUtils.getInt(byteRecord, 10);
-            short store = HashMMap.ByteUtils.getShort(byteRecord, 14);
-            int amount = HashMMap.ByteUtils.getInt(byteRecord, 16);
+            long key = ByteUtils.getLong(byteRecord, 2);
+            int sku = ByteUtils.getInt(byteRecord, 10);
+            short store = ByteUtils.getShort(byteRecord, 14);
+            int amount = ByteUtils.getInt(byteRecord, 16);
 
             LogRecord logRecord = new LogRecord(type, committed, key, sku, store, amount);
 
-            int checkSum = HashMMap.ByteUtils.getInt(byteRecord, 28);
+            int checkSum = ByteUtils.getInt(byteRecord, 28);
             if (logRecord.getControlSum() != checkSum) throw new RuntimeException("Corrupted log file");
 
             return logRecord;

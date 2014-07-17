@@ -1,4 +1,4 @@
-package com.services.availability.server.storage;
+package com.services.availability.model;
 
 /**
  * @author Roman Reva

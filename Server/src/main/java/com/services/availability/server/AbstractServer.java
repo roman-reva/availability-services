@@ -1,4 +1,4 @@
-package com.services.availability.server.core;
+package com.services.availability.server;
 
 import com.services.availability.common.ThroughputMeter;
 import org.apache.log4j.Logger;
@@ -22,22 +22,34 @@ public abstract class AbstractServer {
     protected ThroughputMeter throughputMeter;
     protected ServerSocketChannel serverSocketChannel;
 
+    protected ServerShutdownHook serverShutdownHook = null;
+
     protected AbstractServer() {
+        throughputMeter = new ThroughputMeter();
+
         logger = getLogger();
+    }
+
+    protected AbstractServer(ServerShutdownHook hook) {
+        throughputMeter = new ThroughputMeter();
+
+        logger = getLogger();
+        serverShutdownHook = hook;
     }
 
     public void startup() throws IOException {
         isRunning = true;
 
-        initComponents();
+        verifyRequestProcessor();
         openServerSocket();
         startHeartbeat();
-        addShutdownHook();
 
         serverLoop();
     }
 
     public void shutdown() throws IOException {
+        if (serverShutdownHook != null) serverShutdownHook.beforeShutdownAction();
+
         isRunning = false;
         if (serverSocketChannel != null) {
             serverSocketChannel.close();
@@ -45,13 +57,15 @@ public abstract class AbstractServer {
         if (heartbeatThread != null) {
             heartbeatThread.interrupt();
         }
+
+        if (serverShutdownHook != null) serverShutdownHook.afterShutdownAction();
     }
 
     protected abstract void serverLoop() throws IOException;
 
-    protected void initComponents() {
-        throughputMeter = new ThroughputMeter();
-        requestProcessor = new RequestProcessor(throughputMeter);
+    protected void verifyRequestProcessor() {
+        if (requestProcessor == null)
+            throw  new IllegalStateException("No RequestProcessor is attached");
     }
 
     protected void openServerSocket() throws IOException {
@@ -68,18 +82,21 @@ public abstract class AbstractServer {
 
     protected abstract Logger getLogger();
 
-    protected void addShutdownHook() {
-        final AbstractServer serverObject = this;
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                logger.debug("SHUTDOWN HOOK : Server shutdown event registered.");
-                try {
-                    serverObject.shutdown();
-                } catch (IOException e) {
-                    logger.error("Error during server shutdown", e);
-                }
-            }
-        });
+    public ThroughputMeter getThroughputMeter() {
+        return throughputMeter;
+    }
+
+    public void setRequestProcessor(RequestProcessor requestProcessor) {
+        this.requestProcessor = requestProcessor;
+    }
+
+    /**
+     * An implementation of current interface could be provided to the server,
+     * so that corresponding methods will be executed just before and after
+     * the server shut down.
+     */
+    public static interface ServerShutdownHook {
+        public void beforeShutdownAction();
+        public void afterShutdownAction();
     }
 }

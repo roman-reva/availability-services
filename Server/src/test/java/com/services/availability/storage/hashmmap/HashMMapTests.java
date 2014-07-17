@@ -1,5 +1,6 @@
-package com.services.availability.server.storage;
+package com.services.availability.storage.hashmmap;
 
+import com.services.availability.model.AvailabilityItem;
 import junit.framework.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -30,21 +31,21 @@ public class HashMMapTests {
 
     @Test
     public void byteRecordTestsA() {
-        byte [] record = new byte[HashMMap.BinaryRecord.RECORD_SIZE];
+        byte [] record = new byte[BinaryRecord.RECORD_SIZE];
         long key = 2398436448724698204L;
         int sku = 436346343;
         short store = 892;
         int amount = 89235664;
 
-        HashMMap.BinaryRecord.setKey(key, record);
-        HashMMap.BinaryRecord.setSku(sku, record);
-        HashMMap.BinaryRecord.setStore(store, record);
-        HashMMap.BinaryRecord.setAmount(amount, record);
+        BinaryRecord.setKey(key, record);
+        BinaryRecord.setSku(sku, record);
+        BinaryRecord.setStore(store, record);
+        BinaryRecord.setAmount(amount, record);
 
-        long restoredKey = HashMMap.BinaryRecord.getKey(record);
-        int restoredSku = HashMMap.BinaryRecord.getSku(record);
-        short restoredStore = HashMMap.BinaryRecord.getStore(record);
-        int restoredAmount = HashMMap.BinaryRecord.getAmount(record);
+        long restoredKey = BinaryRecord.getKey(record);
+        int restoredSku = BinaryRecord.getSku(record);
+        short restoredStore = BinaryRecord.getStore(record);
+        int restoredAmount = BinaryRecord.getAmount(record);
 
         Assert.assertEquals(key, restoredKey);
         Assert.assertEquals(sku, restoredSku);
@@ -54,21 +55,21 @@ public class HashMMapTests {
 
     @Test
     public void byteRecordTestsB() {
-        byte [] record = new byte[HashMMap.BinaryRecord.RECORD_SIZE];
+        byte [] record = new byte[BinaryRecord.RECORD_SIZE];
         long key = -2398436448724698204L;
         int sku = -436346343;
         short store = -235;
         int amount = -89235664;
 
-        HashMMap.BinaryRecord.setKey(key, record);
-        HashMMap.BinaryRecord.setSku(sku, record);
-        HashMMap.BinaryRecord.setStore(store, record);
-        HashMMap.BinaryRecord.setAmount(amount, record);
+        BinaryRecord.setKey(key, record);
+        BinaryRecord.setSku(sku, record);
+        BinaryRecord.setStore(store, record);
+        BinaryRecord.setAmount(amount, record);
 
-        long restoredKey = HashMMap.BinaryRecord.getKey(record);
-        int restoredSku = HashMMap.BinaryRecord.getSku(record);
-        short restoredStore = HashMMap.BinaryRecord.getStore(record);
-        int restoredAmount = HashMMap.BinaryRecord.getAmount(record);
+        long restoredKey = BinaryRecord.getKey(record);
+        int restoredSku = BinaryRecord.getSku(record);
+        short restoredStore = BinaryRecord.getStore(record);
+        int restoredAmount = BinaryRecord.getAmount(record);
 
         Assert.assertEquals(key, restoredKey);
         Assert.assertEquals(sku, restoredSku);
@@ -78,21 +79,21 @@ public class HashMMapTests {
 
     @Test
     public void byteRecordTestsC() {
-        byte [] record = new byte[HashMMap.BinaryRecord.RECORD_SIZE];
+        byte [] record = new byte[BinaryRecord.RECORD_SIZE];
         long key = 1;
         int sku = -1;
         short store = 128;
         int amount = -1024;
 
-        HashMMap.BinaryRecord.setKey(key, record);
-        HashMMap.BinaryRecord.setSku(sku, record);
-        HashMMap.BinaryRecord.setStore(store, record);
-        HashMMap.BinaryRecord.setAmount(amount, record);
+        BinaryRecord.setKey(key, record);
+        BinaryRecord.setSku(sku, record);
+        BinaryRecord.setStore(store, record);
+        BinaryRecord.setAmount(amount, record);
 
-        long restoredKey = HashMMap.BinaryRecord.getKey(record);
-        int restoredSku = HashMMap.BinaryRecord.getSku(record);
-        short restoredStore = HashMMap.BinaryRecord.getStore(record);
-        int restoredAmount = HashMMap.BinaryRecord.getAmount(record);
+        long restoredKey = BinaryRecord.getKey(record);
+        int restoredSku = BinaryRecord.getSku(record);
+        short restoredStore = BinaryRecord.getStore(record);
+        int restoredAmount = BinaryRecord.getAmount(record);
 
         Assert.assertEquals(key, restoredKey);
         Assert.assertEquals(sku, restoredSku);

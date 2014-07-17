@@ -1,6 +1,8 @@
-package com.services.availability.server.storage;
+package com.services.availability.storage.hashmmap;
 
-import junit.framework.Assert;
+import com.services.availability.model.AvailabilityItem;
+import com.services.availability.TestUtils;
+import com.services.availability.storage.hashmmap.ConcurrentHashMMap;
 import junit.framework.AssertionFailedError;
 import org.junit.Test;
 

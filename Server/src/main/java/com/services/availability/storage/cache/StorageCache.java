@@ -1,5 +1,6 @@
-package com.services.availability.server.storage;
+package com.services.availability.storage.cache;
 
+import com.services.availability.model.AvailabilityItem;
 import org.apache.log4j.Logger;
 
 import java.util.Collections;
@@ -11,14 +12,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * @version 1.0
  * @since 2014-07-14 12:15
  */
-public class Cache {
-    private static final Logger log = Logger.getLogger(Cache.class);
+public class StorageCache {
+    private static final Logger log = Logger.getLogger(StorageCache.class);
 
     public static final int DEFAULT_CACHE_CAPACITY = 1000;          // default max number of elements in front cash
     private int cacheCapacity = DEFAULT_CACHE_CAPACITY;             // current max number of elements in front cash
     private volatile CacheContainer container;
 
-    public Cache() {
+    public StorageCache() {
         ConcurrentHashMap<Long, CacheValue> frontCache = new ConcurrentHashMap<Long, CacheValue>();
         ConcurrentHashMap<Long, CacheValue> backCache = new ConcurrentHashMap<Long, CacheValue>();
         container = new CacheContainer(frontCache, backCache);
@@ -118,38 +119,6 @@ public class Cache {
         public CacheContainer(ConcurrentHashMap<Long, CacheValue> fc, ConcurrentHashMap<Long, CacheValue> bc) {
             this.frontCache = fc;
             this.backCache = bc;
-        }
-    }
-
-    /**
-     * Class describes an object that is returned by each PUT/GET/REMOVE operation on cache.
-     */
-    public static class OperationResult {
-        private boolean foundByKey;             // true, if cache contains the specified key
-        private AvailabilityItem value;         // proper availability item to return
-
-        public OperationResult(boolean foundByKey, AvailabilityItem value) {
-            this.foundByKey = foundByKey;
-            this.value = value;
-        }
-
-        public boolean isFoundByKey() {
-            return foundByKey;
-        }
-
-        public AvailabilityItem getValue() {
-            return value;
-        }
-    }
-
-    /**
-     * Wrapper for an availability item. Is required for cache to be able to hold NULL values.
-     */
-    public static class CacheValue {
-        protected AvailabilityItem value;
-
-        public CacheValue(AvailabilityItem value) {
-            this.value = value;
         }
     }
 }

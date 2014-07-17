@@ -1,4 +1,6 @@
-package com.services.availability.server.storage;
+package com.services.availability.storage;
+
+import com.services.availability.model.AvailabilityItem;
 
 /**
  * @author Roman Reva
@@ -12,5 +14,7 @@ public interface Storage {
     public AvailabilityItem get(long key);
 
     public AvailabilityItem remove(long key);
+
+    public void prepareForShutdown();
 
 }
