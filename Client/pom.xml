@@ -32,7 +32,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.services.availability.client.ClientApp</mainClass>
+                            <mainClass>com.services.availability.client.BenchmarkApp</mainClass>
                         </manifest>
                     </archive>
                     <descriptorRefs>

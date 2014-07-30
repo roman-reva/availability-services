@@ -1,8 +1,11 @@
 package com.services.availability;
 
+import com.services.availability.server.AbstractServer;
+import com.services.availability.server.BinaryMultiThreadServer;
 import com.services.availability.server.BinarySingleThreadServer;
 import com.services.availability.server.RequestProcessor;
 import com.services.availability.storage.CachedLoggedStorage;
+import com.services.availability.storage.InMemoryStorage;
 import com.services.availability.storage.Storage;
 import org.apache.log4j.Logger;
 
@@ -16,15 +19,16 @@ import java.io.IOException;
 public class AvailabilityService {
     private Logger logger = Logger.getLogger(AvailabilityService.class);
 
-    private final BinarySingleThreadServer server;
+    private final AbstractServer server;
     private final Storage storage;
 
     /**
      * Default constructor. Builds up all main components.
      */
     private AvailabilityService() {
-        storage = new CachedLoggedStorage();
-        server = new BinarySingleThreadServer();
+        storage = new InMemoryStorage(7);
+//        server = new BinarySingleThreadServer();
+        server = new BinaryMultiThreadServer(32);
 
         RequestProcessor requestProcessor = new RequestProcessor(server.getThroughputMeter(), storage);
         server.setRequestProcessor(requestProcessor);
@@ -33,7 +37,7 @@ public class AvailabilityService {
     }
 
     /**
-     * Method adds a shutdown hook that shuts down the server and prepares
+     * Method adds a shutdown hook that shuts down the client and prepares
      * storage for safe shut down.
      */
     private void addShutdownHook() {

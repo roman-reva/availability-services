@@ -1,12 +1,7 @@
-package com.services.availability.client;
+package com.services.availability.client.common;
 
-import com.services.availability.protocol.AbstractRequest;
-import com.services.availability.protocol.GetAvailabilityRequest;
-import com.services.availability.protocol.PutAvailabilityRequest;
-import com.services.availability.protocol.RemoveAvailabilityRequest;
 import com.services.availability.protocol.binary.BinaryRequest;
 import com.services.availability.protocol.binary.BinaryRequestType;
-import com.services.availability.protocol.binary.BinaryResponse;
 
 import java.util.Random;
 
@@ -22,10 +17,6 @@ public class RandomRequestGenerator {
         return new BinaryRequest(getRequestType(), getSku(), getStore(), getAmount());
     }
 
-    public PutAvailabilityRequest getRequest() {
-        return new PutAvailabilityRequest(getSku(), getStore(), getAmount());
-    }
-
     private int getSku() {
         return random.nextInt();
     }
@@ -39,7 +30,7 @@ public class RandomRequestGenerator {
     }
 
     private BinaryRequestType getRequestType() {
-        int code = random.nextInt(3) + 1;
+        int code = random.nextInt(2) + 1;
         return BinaryRequestType.getByCode(code);
     }
 

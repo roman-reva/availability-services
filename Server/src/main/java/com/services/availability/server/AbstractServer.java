@@ -65,7 +65,7 @@ public abstract class AbstractServer {
 
     protected void verifyRequestProcessor() {
         if (requestProcessor == null)
-            throw  new IllegalStateException("No RequestProcessor is attached");
+            throw new IllegalStateException("No RequestProcessor is attached");
     }
 
     protected void openServerSocket() throws IOException {
@@ -91,9 +91,9 @@ public abstract class AbstractServer {
     }
 
     /**
-     * An implementation of current interface could be provided to the server,
+     * An implementation of current interface could be provided to the client,
      * so that corresponding methods will be executed just before and after
-     * the server shut down.
+     * the client shut down.
      */
     public static interface ServerShutdownHook {
         public void beforeShutdownAction();

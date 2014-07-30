@@ -9,8 +9,8 @@ import com.services.availability.common.ThroughputMeter;
 import com.services.availability.storage.Storage;
 
 /**
- * Current class fetches data from server requests, executes PUT, GET and REMOVE
- * business operations and returns a server response.
+ * Current class fetches data from client requests, executes PUT, GET and REMOVE
+ * business operations and returns a client response.
  *
  * @author Roman Reva
  * @version 1.0
@@ -58,7 +58,7 @@ public class RequestProcessor {
      * operation on storage.
      *
      * @param request request to process
-     * @return server response
+     * @return client response
      */
     private BinaryResponse processPut(BinaryRequest request) {
         AvailabilityItem item = new AvailabilityItem(request.getSku(), request.getStore(), request.getAmount());
@@ -71,7 +71,7 @@ public class RequestProcessor {
      * operation on storage.
      *
      * @param request request to process
-     * @return server response
+     * @return client response
      */
     private BinaryResponse processGet(BinaryRequest request) {
         AvailabilityItem item = storage.get(AvailabilityItem.key(request.getSku(), request.getStore()));
@@ -86,7 +86,7 @@ public class RequestProcessor {
      * operation on storage.
      *
      * @param request request to process
-     * @return server response
+     * @return client response
      */
     private BinaryResponse processRemove(BinaryRequest request) {
         AvailabilityItem item = storage.remove(AvailabilityItem.key(request.getSku(), request.getStore()));

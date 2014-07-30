@@ -1,7 +1,6 @@
-package com.services.availability.client;
+package com.services.availability.client.singlethread;
 
 import com.services.availability.common.ThroughputMeter;
-import com.services.availability.protocol.*;
 import com.services.availability.protocol.binary.BinaryRequest;
 import com.services.availability.protocol.binary.BinaryResponse;
 
@@ -13,7 +12,7 @@ import java.net.InetSocketAddress;
  * @version 1.0
  * @since 2014-06-25 14:15
  */
-public abstract class AbstractClient {
+public abstract class AbstractClient implements Client {
     protected final InetSocketAddress serverAddress;
     protected final ThroughputMeter throughputMeter;
 
@@ -22,9 +21,6 @@ public abstract class AbstractClient {
         throughputMeter = new ThroughputMeter();
     }
 
-    public abstract PutAvailabilityResponse performRequest(PutAvailabilityRequest request) throws IOException;
-    public abstract GetAvailabilityResponse performRequest(GetAvailabilityRequest request) throws IOException;
-    public abstract RemoveAvailabilityResponse performRequest(RemoveAvailabilityRequest request) throws IOException;
     public abstract BinaryResponse performRequest(BinaryRequest request) throws IOException;
 
     public abstract void initClient() throws IOException;

@@ -1,4 +1,4 @@
-package com.services.availability.client;
+package com.services.availability.client.singlethread;
 
 import com.services.availability.common.ThroughputMeter;
 import org.apache.log4j.Logger;

@@ -8,6 +8,8 @@ import java.nio.ByteBuffer;
  * @since 2014-06-26 12:52
  */
 public class BinaryRequest {
+    public static final int REQUEST_SIZE = 11;              // 1 + 4 + 2 + 4 bytes
+
     private BinaryRequestType requestType;
     private int sku;
     private short store;

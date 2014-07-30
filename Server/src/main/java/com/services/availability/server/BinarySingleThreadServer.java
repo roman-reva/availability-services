@@ -22,7 +22,7 @@ public class BinarySingleThreadServer extends AbstractServer {
     private final InetSocketAddress serverAddress = new InetSocketAddress(8888);
 
     /**
-     * Default server constructor.
+     * Default client constructor.
      */
     public BinarySingleThreadServer() {
         super();
@@ -30,7 +30,7 @@ public class BinarySingleThreadServer extends AbstractServer {
 
     /**
      * Current constructor allows to provide ServerShutdownHook entity that
-     * will contain some actions that should be executed during the server
+     * will contain some actions that should be executed during the client
      * shutdown.
      *
      * @param hook implementation of a ServerShutdownHook interface
