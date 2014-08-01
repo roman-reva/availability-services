@@ -13,6 +13,7 @@
         <module>Common</module>
         <module>Client</module>
         <module>Server</module>
+        <module>FileBenchmark</module>
     </modules>
 
     <dependencies>
