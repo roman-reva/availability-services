@@ -20,19 +20,19 @@ public class LogManager {
     /**
      * Set of log files identified by filename.
      */
-    private Map<String, FileData> files = new ConcurrentHashMap<String, FileData>();
+    private Map<String, LogDescriptor> files = new ConcurrentHashMap<String, LogDescriptor>();
 
     /**
      * Opens the specified log file in the specified mode, creates file
      * descriptor and adds it to the collection.
      *
      * @param filename log file name
-     * @param mode FileData.MODE_READ, FileData.MODE_WRITE, FileData.MODE_RW
+     * @param mode LogDescriptor.MODE_READ, LogDescriptor.MODE_WRITE, LogDescriptor.MODE_RW
      */
-    public void openLogFile(String filename, int mode) {
+    public LogDescriptor openLogFile(String filename, int mode) {
         synchronized (filename.intern()) {
-            FileData fileData = new FileData(filename, mode);
-            File logFile = fileData.logFile;
+            LogDescriptor logDescriptor = new LogDescriptor(filename, mode);
+            File logFile = logDescriptor.logFile;
             boolean fileExists = logFile.exists();
             try {
                 if (!fileExists) {
@@ -41,13 +41,15 @@ public class LogManager {
                     log.debug("New log file created; filename = " + logFile.getName());
                 }
 
-                if ((mode & FileData.MODE_WRITE) == FileData.MODE_WRITE)
-                    fileData.logFos = new FileOutputStream(logFile);
+                if ((mode & LogDescriptor.MODE_WRITE) == LogDescriptor.MODE_WRITE)
+                    logDescriptor.logFos = new FileOutputStream(logFile);
 
-                if ((mode & FileData.MODE_READ) == FileData.MODE_READ)
-                    fileData.logFis = new FileInputStream(logFile);
+                if ((mode & LogDescriptor.MODE_READ) == LogDescriptor.MODE_READ)
+                    logDescriptor.logFis = new FileInputStream(logFile);
 
-                files.put(filename, fileData);
+                files.put(filename, logDescriptor);
+
+                return logDescriptor;
             } catch (FileNotFoundException e) {
                 log.error(e);
                 throw new RuntimeException("Not able to open log file", e);
@@ -62,22 +64,22 @@ public class LogManager {
      * Closes specified file and removes corresponding descriptor from the
      * log file set.
      *
-     * @param filename file to close
+     * @param logDescriptor file to close
      */
-    public void closeLogFiles(String filename) {
-        synchronized (filename.intern()) {
-            verifyFileOpen(filename);
+    public void closeLogFiles(LogDescriptor logDescriptor) {
+        synchronized (logDescriptor.monitor()) {
+            verifyFileOpen(logDescriptor);
 
-            FileData fileData = files.remove(filename);
+            files.remove(logDescriptor.filename);
 
             try {
                 boolean logFisClosed=false, logFosClosed=false;
-                if (fileData.fileOpenForRead()) {
-                    fileData.logFis.close();
+                if (logDescriptor.fileOpenForRead()) {
+                    logDescriptor.logFis.close();
                     logFisClosed = true;
                 }
-                if (fileData.fileOpenForWrite()) {
-                    fileData.logFos.close();
+                if (logDescriptor.fileOpenForWrite()) {
+                    logDescriptor.logFos.close();
                     logFosClosed = true;
                 }
 
@@ -92,33 +94,31 @@ public class LogManager {
      * Verifies that specified file is open for write and puts
      * the <i>data</i> into output stream.
      *
-     * @param filename log file
+     * @param logDescriptor log file
      * @param data data to write
      * @throws IOException
      */
-    public void write(String filename, byte[] data) throws IOException {
-        verifyFileOpen(filename);
-        synchronized (filename.intern()) {
-            FileData fileData = files.get(filename);
-            if (!fileData.fileOpenForWrite()) throw new IllegalStateException("File `" + fileData + "` is not open for write");
+    public void write(LogDescriptor logDescriptor, byte[] data) throws IOException {
+        verifyFileOpen(logDescriptor);
+        synchronized (logDescriptor.monitor()) {
+            if (!logDescriptor.fileOpenForWrite()) throw new IllegalStateException("File `" + logDescriptor + "` is not open for write");
 
-            fileData.logFos.write(data);
+            logDescriptor.logFos.write(data);
         }
     }
 
     /**
      * Performs flush of the specified file's output stream.
      *
-     * @param filename log file name
+     * @param logDescriptor log file name
      * @throws IOException
      */
-    public void flush(String filename) throws IOException {
-        verifyFileOpen(filename);
-        synchronized (filename.intern()) {
-            FileData fileData = files.get(filename);
-            if (!fileData.fileOpenForWrite()) throw new IllegalStateException("File `" + fileData + "` is not open for write");
+    public void flush(LogDescriptor logDescriptor) throws IOException {
+        verifyFileOpen(logDescriptor);
+        synchronized (logDescriptor.monitor()) {
+            if (!logDescriptor.fileOpenForWrite()) throw new IllegalStateException("File `" + logDescriptor + "` is not open for write");
 
-            fileData.logFos.flush();
+            logDescriptor.logFos.flush();
         }
     }
 
@@ -126,29 +126,28 @@ public class LogManager {
      * Verifies that specified file is open for write, puts the <i>data</i>
      * into output stream and flushes the changes.
      *
-     * @param filename log file name
+     * @param logDescriptor log file name
      * @param data data
      * @throws IOException
      */
-    public void writeAndFlush(String filename, byte[] data) throws IOException {
-        verifyFileOpen(filename);
-        synchronized (filename.intern()) {
-            FileData fileData = files.get(filename);
-            if (!fileData.fileOpenForWrite()) throw new IllegalStateException("File `" + fileData + "` is not open for write");
+    public void writeAndFlush(LogDescriptor logDescriptor, byte[] data) throws IOException {
+        verifyFileOpen(logDescriptor);
+        synchronized (logDescriptor.monitor()) {
+            if (!logDescriptor.fileOpenForWrite()) throw new IllegalStateException("File `" + logDescriptor + "` is not open for write");
 
-            fileData.logFos.write(data);
-            fileData.logFos.flush();
+            logDescriptor.logFos.write(data);
+            logDescriptor.logFos.flush();
         }
     }
 
     /**
      * Throws IllegalArgumentException if specified file is not open.
      *
-     * @param filename log file to verify
+     * @param logDescriptor log file to verify
      */
-    private void verifyFileOpen(String filename) {
-        if (!files.containsKey(filename)) {
-            throw new IllegalArgumentException("No open file found with name = " + filename);
+    private void verifyFileOpen(LogDescriptor logDescriptor) {
+        if (!files.containsValue(logDescriptor)) {
+            throw new IllegalArgumentException("No open file found (" + logDescriptor + ")");
         }
     }
 }

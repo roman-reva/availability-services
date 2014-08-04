@@ -1,8 +1,8 @@
 package com.services.availability.filebenchmark;
 
 import com.services.availability.common.ArgumentsExtractor;
+import com.services.availability.storage.commitlog.LogDescriptor;
 import com.services.availability.storage.commitlog.LogManager;
-import com.services.availability.storage.commitlog.FileData;
 import org.apache.log4j.Logger;
 
 import java.io.IOException;
@@ -84,9 +84,9 @@ public class Benchmark {
         // opening log files and creating threads
         List<WriterThread> threads = new ArrayList<WriterThread>();
         for (int i=0; i<threadNum; i++) {
-            String logFile = multiLogPrefix + threadNum + "_" + i + multiLogPostfix;
-            logManager.openLogFile(logFile, FileData.MODE_WRITE);
-            WriterThread threadA = new WriterThread(logManager, logFile, chunks);
+            String logFilename = multiLogPrefix + threadNum + "_" + i + multiLogPostfix;
+            LogDescriptor descriptor = logManager.openLogFile(logFilename, LogDescriptor.MODE_WRITE);
+            WriterThread threadA = new WriterThread(logManager, descriptor, chunks);
             threads.add(threadA);
         }
 
@@ -110,10 +110,9 @@ public class Benchmark {
         // closing logs and getting max time
         long stopTime = 0;
         for (int i=0; i<threadNum; i++) {
-            String logFile = multiLogPrefix + threadNum + "_" + i + multiLogPostfix;
-            logManager.closeLogFiles(logFile);
-
             WriterThread thread = threads.get(i);
+
+            logManager.closeLogFiles(thread.logDescriptor);
             stopTime = Math.max(stopTime, thread.stopTime);
         }
 
@@ -135,7 +134,7 @@ public class Benchmark {
     }
 
     private class WriterThread extends Thread {
-        private final String log;
+        private final LogDescriptor logDescriptor;
         private final DataChunk[] data;
         private final LogManager writer;
         private volatile boolean completed = false;
@@ -143,9 +142,9 @@ public class Benchmark {
 
         private final long[] latencies;
 
-        private WriterThread(LogManager writer, String log, DataChunk[] data) {
+        private WriterThread(LogManager writer, LogDescriptor logDescriptor, DataChunk[] data) {
             super();
-            this.log = log;
+            this.logDescriptor = logDescriptor;
             this.data = data;
             this.writer = writer;
             this.latencies = new long[data.length];
@@ -156,7 +155,7 @@ public class Benchmark {
                 int i=0;
                 for (DataChunk chunk: data) {
                     long startTime = System.nanoTime();
-                    writer.writeAndFlush(log, chunk.data);
+                    writer.writeAndFlush(logDescriptor, chunk.data);
                     long ltc = System.nanoTime() - startTime;
                     latencies[i++] = ltc;
                 }

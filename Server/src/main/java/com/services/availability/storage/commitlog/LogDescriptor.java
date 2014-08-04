@@ -9,7 +9,7 @@ import java.io.FileOutputStream;
  * @version 1.0
  * @since 2014-07-31 16:05
  */
-public class FileData {
+public class LogDescriptor {
     public static final int MODE_READ = 1;
     public static final int MODE_WRITE = 1 << 1;
     public static final int MODE_RW = MODE_READ | MODE_WRITE;
@@ -20,7 +20,7 @@ public class FileData {
     protected FileInputStream logFis = null;
     protected FileOutputStream logFos = null;
 
-    public FileData(String filename, int mode) {
+    public LogDescriptor(String filename, int mode) {
         this.filename = filename;
         this.mode = mode;
         this.logFile = new File(filename);
@@ -36,5 +36,9 @@ public class FileData {
 
     public String toString() {
         return filename + " (mode=" + (fileOpenForRead() ? "R" : "") + (fileOpenForWrite() ? "W" : "") + ")";
+    }
+
+    public String monitor() {
+        return filename.intern();
     }
 }
