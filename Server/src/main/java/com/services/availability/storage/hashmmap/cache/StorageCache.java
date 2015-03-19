@@ -1,4 +1,4 @@
-package com.services.availability.storage.cache;
+package com.services.availability.storage.hashmmap.cache;
 
 import com.services.availability.model.AvailabilityItem;
 import org.apache.log4j.Logger;

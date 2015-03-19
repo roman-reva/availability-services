@@ -1,12 +1,13 @@
-package com.services.availability.storage.commitlog;
+package com.services.availability.storage.ccl.commitlog;
 
 import com.services.availability.model.AvailabilityItem;
+import com.services.availability.storage.ccl.LogRecord;
+import com.services.availability.utils.ByteUtils;
 import org.apache.log4j.Logger;
 
 import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -54,6 +55,12 @@ public class CommitLog {
         openLogs(threadNumber);
     }
 
+    public void closeLogFiles() {
+        for (LogDescriptor descriptor: availableLogs) {
+            logManager.closeLogFiles(descriptor);
+        }
+    }
+
     /**
      * Current method opens for write necessary number of log files and
      * add all logs to availableLogs collection.
@@ -83,16 +90,25 @@ public class CommitLog {
     }
 
     private void writeRecord(LogRecord record) throws IOException {
-//        logFos.write(LogRecord.toByteArray(record));
-//        logFos.flush();
+        LogDescriptor descriptor = availableLogs.remove();
+        descriptor.logFos.write(LogRecord.toByteArray(record));
+        descriptor.logFos.flush();
+        availableLogs.add(descriptor);
     }
 
-    private void writeHeader(int recordsCommitted) throws IOException {
+//    private void writeHeader(FileOutputStream logFos, int recordsCommitted) throws IOException {
 //        byte[] header = new byte[32];
 //        ByteUtils.putInt(recordsCommitted, header, 0);
-//        logFos.write(header);
+//        logFos.write(header, 0, 2);
 //        logFos.flush();
-    }
+//    }
+
+//    private int readHeader(FileInputStream fis) throws IOException {
+//        byte[] header = new byte[32];
+//        fis.read(header, 0, 32);
+//        int recNum = ByteUtils.getInt(header, 0);
+//        return recNum;
+//    }
 
     private String currentGrp() {
         return LOGFILE_GRP_A;

@@ -2,9 +2,7 @@ package com.services.availability.storage.hashmmap;
 
 import com.services.availability.model.AvailabilityItem;
 import com.services.availability.storage.Storage;
-import com.services.availability.storage.cache.CacheValue;
-import com.services.availability.storage.cache.OperationResult;
-import com.services.availability.storage.cache.StorageCache;
+import com.services.availability.storage.hashmmap.cache.*;
 import org.apache.log4j.Logger;
 
 import java.util.Map;

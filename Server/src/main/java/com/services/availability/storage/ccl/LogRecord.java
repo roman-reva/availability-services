@@ -1,4 +1,4 @@
-package com.services.availability.storage.commitlog;
+package com.services.availability.storage.ccl;
 
 import com.services.availability.utils.ByteUtils;
 
@@ -11,7 +11,7 @@ import com.services.availability.utils.ByteUtils;
  * @version 1.0
  * @since 2014-08-01 18:36
  */
-public class LogRecord {
+public class LogRecord implements Comparable<LogRecord> {
     public static final byte TYPE_PUT = 1;                  // put operation
     public static final byte TYPE_REMOVE = 2;               // remove operation
 
@@ -157,5 +157,12 @@ public class LogRecord {
         result = 31 * result + (int) store;
         result = 31 * result + amount;
         return result;
+    }
+
+    @Override
+    public int compareTo(LogRecord o) {
+        if (this.timestamp > o.timestamp) return 1;
+        if (this.timestamp < o.timestamp) return -1;
+        return 0;
     }
 }

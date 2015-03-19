@@ -1,8 +1,8 @@
 package com.services.availability.filebenchmark;
 
 import com.services.availability.common.ArgumentsExtractor;
-import com.services.availability.storage.commitlog.LogDescriptor;
-import com.services.availability.storage.commitlog.LogManager;
+import com.services.availability.storage.ccl.commitlog.LogDescriptor;
+import com.services.availability.storage.ccl.commitlog.LogManager;
 import org.apache.log4j.Logger;
 
 import java.io.IOException;

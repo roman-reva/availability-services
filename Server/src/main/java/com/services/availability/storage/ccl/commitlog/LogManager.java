@@ -1,4 +1,4 @@
-package com.services.availability.storage.commitlog;
+package com.services.availability.storage.ccl.commitlog;
 
 import org.apache.log4j.Logger;
 
